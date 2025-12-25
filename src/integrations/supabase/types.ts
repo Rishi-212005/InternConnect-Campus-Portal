@@ -74,10 +74,12 @@ export type Database = {
           id: string
           job_id: string
           max_attempts: number | null
+          min_questions: number | null
           passing_score: number
           start_time: string | null
           status: string | null
           title: string
+          total_marks: number | null
           updated_at: string
         }
         Insert: {
@@ -89,10 +91,12 @@ export type Database = {
           id?: string
           job_id: string
           max_attempts?: number | null
+          min_questions?: number | null
           passing_score?: number
           start_time?: string | null
           status?: string | null
           title: string
+          total_marks?: number | null
           updated_at?: string
         }
         Update: {
@@ -104,10 +108,12 @@ export type Database = {
           id?: string
           job_id?: string
           max_attempts?: number | null
+          min_questions?: number | null
           passing_score?: number
           start_time?: string | null
           status?: string | null
           title?: string
+          total_marks?: number | null
           updated_at?: string
         }
         Relationships: [
@@ -242,7 +248,11 @@ export type Database = {
           assessment_id: string
           created_at: string
           id: string
+          next_round_info: string | null
           percentage_score: number | null
+          result_confirmed: boolean | null
+          result_confirmed_at: string | null
+          result_confirmed_by: string | null
           started_at: string
           status: string | null
           student_id: string
@@ -254,7 +264,11 @@ export type Database = {
           assessment_id: string
           created_at?: string
           id?: string
+          next_round_info?: string | null
           percentage_score?: number | null
+          result_confirmed?: boolean | null
+          result_confirmed_at?: string | null
+          result_confirmed_by?: string | null
           started_at?: string
           status?: string | null
           student_id: string
@@ -266,7 +280,11 @@ export type Database = {
           assessment_id?: string
           created_at?: string
           id?: string
+          next_round_info?: string | null
           percentage_score?: number | null
+          result_confirmed?: boolean | null
+          result_confirmed_at?: string | null
+          result_confirmed_by?: string | null
           started_at?: string
           status?: string | null
           student_id?: string
@@ -533,6 +551,98 @@ export type Database = {
           user_id?: string
         }
         Relationships: []
+      }
+      quiz_questions: {
+        Row: {
+          assessment_id: string
+          correct_answer: string
+          created_at: string
+          id: string
+          marks: number
+          option_a: string
+          option_b: string
+          option_c: string
+          option_d: string
+          question_text: string
+        }
+        Insert: {
+          assessment_id: string
+          correct_answer: string
+          created_at?: string
+          id?: string
+          marks?: number
+          option_a: string
+          option_b: string
+          option_c: string
+          option_d: string
+          question_text: string
+        }
+        Update: {
+          assessment_id?: string
+          correct_answer?: string
+          created_at?: string
+          id?: string
+          marks?: number
+          option_a?: string
+          option_b?: string
+          option_c?: string
+          option_d?: string
+          question_text?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quiz_questions_assessment_id_fkey"
+            columns: ["assessment_id"]
+            isOneToOne: false
+            referencedRelation: "assessments"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      quiz_responses: {
+        Row: {
+          attempt_id: string
+          created_at: string
+          id: string
+          is_correct: boolean | null
+          marks_obtained: number | null
+          question_id: string
+          selected_answer: string | null
+        }
+        Insert: {
+          attempt_id: string
+          created_at?: string
+          id?: string
+          is_correct?: boolean | null
+          marks_obtained?: number | null
+          question_id: string
+          selected_answer?: string | null
+        }
+        Update: {
+          attempt_id?: string
+          created_at?: string
+          id?: string
+          is_correct?: boolean | null
+          marks_obtained?: number | null
+          question_id?: string
+          selected_answer?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quiz_responses_attempt_id_fkey"
+            columns: ["attempt_id"]
+            isOneToOne: false
+            referencedRelation: "exam_attempts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quiz_responses_question_id_fkey"
+            columns: ["question_id"]
+            isOneToOne: false
+            referencedRelation: "quiz_questions"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       recruiter_profiles: {
         Row: {

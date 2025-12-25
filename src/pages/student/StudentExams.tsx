@@ -1,17 +1,11 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Textarea } from '@/components/ui/textarea';
 import { Progress } from '@/components/ui/progress';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { Label } from '@/components/ui/label';
 import {
   Dialog,
   DialogContent,
@@ -24,7 +18,6 @@ import {
   Clock,
   Play,
   CheckCircle,
-  Code,
   Loader2,
   AlertTriangle,
   Timer,
@@ -32,36 +25,13 @@ import {
   ChevronLeft,
   ChevronRight,
   XCircle,
+  FileQuestion,
+  HelpCircle,
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useSupabaseAuthContext } from '@/contexts/SupabaseAuthContext';
 import { useToast } from '@/hooks/use-toast';
 import { format } from 'date-fns';
-
-type ProgrammingLanguage = 'javascript' | 'python' | 'java' | 'c';
-
-const LANGUAGE_OPTIONS: { value: ProgrammingLanguage; label: string; starterCode: string }[] = [
-  { 
-    value: 'javascript', 
-    label: 'JavaScript',
-    starterCode: '// Write your JavaScript solution here\nfunction solution(input) {\n  // Your code here\n  return result;\n}'
-  },
-  { 
-    value: 'python', 
-    label: 'Python',
-    starterCode: '# Write your Python solution here\ndef solution(input):\n    # Your code here\n    return result'
-  },
-  { 
-    value: 'java', 
-    label: 'Java',
-    starterCode: '// Write your Java solution here\npublic class Solution {\n    public static int solution(int input) {\n        // Your code here\n        return result;\n    }\n}'
-  },
-  { 
-    value: 'c', 
-    label: 'C',
-    starterCode: '// Write your C solution here\n#include <stdio.h>\n\nint solution(int input) {\n    // Your code here\n    return result;\n}'
-  },
-];
 
 interface Assessment {
   id: string;
@@ -71,19 +41,18 @@ interface Assessment {
   duration_minutes: number;
   passing_score: number;
   status: string;
+  total_marks: number;
   jobs?: { title: string; company_name: string };
 }
 
-interface CodingQuestion {
+interface QuizQuestion {
   id: string;
-  title: string;
-  description: string;
-  difficulty: string;
-  constraints: string | null;
-  examples: string | null;
-  starter_code: string | null;
-  test_cases: unknown;
-  points: number;
+  question_text: string;
+  option_a: string;
+  option_b: string;
+  option_c: string;
+  option_d: string;
+  marks: number;
 }
 
 interface ExamAttempt {
@@ -94,6 +63,8 @@ interface ExamAttempt {
   total_score: number;
   percentage_score: number;
   status: string;
+  result_confirmed: boolean;
+  next_round_info: string | null;
 }
 
 const StudentExams: React.FC = () => {
@@ -106,17 +77,13 @@ const StudentExams: React.FC = () => {
   
   // Exam state
   const [activeExam, setActiveExam] = useState<Assessment | null>(null);
-  const [questions, setQuestions] = useState<CodingQuestion[]>([]);
+  const [questions, setQuestions] = useState<QuizQuestion[]>([]);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [answers, setAnswers] = useState<Record<string, string>>({});
-  const [selectedLanguage, setSelectedLanguage] = useState<ProgrammingLanguage>('javascript');
-  const [questionLanguages, setQuestionLanguages] = useState<Record<string, ProgrammingLanguage>>({});
   const [currentAttempt, setCurrentAttempt] = useState<ExamAttempt | null>(null);
   const [timeRemaining, setTimeRemaining] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isRunningTests, setIsRunningTests] = useState(false);
   const [showConfirmSubmit, setShowConfirmSubmit] = useState(false);
-  const [testResults, setTestResults] = useState<Record<string, { passed: number; total: number; results?: { passed: boolean; input: unknown; expected: unknown; actual: unknown; error?: string }[] }>>({});
 
   const fetchAssessments = async () => {
     if (!user) return;
@@ -211,25 +178,14 @@ const StudentExams: React.FC = () => {
         setCurrentAttempt(attempt);
       }
 
-      // Fetch questions
+      // Fetch questions (without correct answers - they shouldn't be sent to client)
       const { data: questionsData } = await supabase
-        .from('coding_questions')
-        .select('*')
+        .from('quiz_questions')
+        .select('id, question_text, option_a, option_b, option_c, option_d, marks')
         .eq('assessment_id', assessment.id);
 
       setQuestions(questionsData || []);
-      
-      // Initialize answers with starter code and language
-      const initialAnswers: Record<string, string> = {};
-      const initialLanguages: Record<string, ProgrammingLanguage> = {};
-      questionsData?.forEach(q => {
-        initialAnswers[q.id] = q.starter_code || LANGUAGE_OPTIONS[0].starterCode;
-        initialLanguages[q.id] = 'javascript';
-      });
-      setAnswers(initialAnswers);
-      setQuestionLanguages(initialLanguages);
-      setSelectedLanguage('javascript');
-
+      setAnswers({});
       setActiveExam(assessment);
       setTimeRemaining(assessment.duration_minutes * 60);
       setCurrentQuestionIndex(0);
@@ -238,77 +194,8 @@ const StudentExams: React.FC = () => {
     }
   };
 
-  const handleLanguageChange = (language: ProgrammingLanguage) => {
-    const currentQuestion = questions[currentQuestionIndex];
-    if (!currentQuestion) return;
-    
-    setSelectedLanguage(language);
-    setQuestionLanguages(prev => ({ ...prev, [currentQuestion.id]: language }));
-    
-    // Update starter code if answer is empty or still default
-    const currentAnswer = answers[currentQuestion.id] || '';
-    const isDefaultCode = LANGUAGE_OPTIONS.some(opt => 
-      currentAnswer.trim() === opt.starterCode.trim() || currentAnswer.trim() === ''
-    );
-    
-    if (isDefaultCode || currentAnswer === currentQuestion.starter_code) {
-      const langOption = LANGUAGE_OPTIONS.find(opt => opt.value === language);
-      if (langOption) {
-        setAnswers(prev => ({ ...prev, [currentQuestion.id]: langOption.starterCode }));
-      }
-    }
-  };
-
-  const runTests = async (questionId: string) => {
-    const question = questions.find(q => q.id === questionId);
-    if (!question) return;
-
-    const code = answers[questionId];
-    const language = questionLanguages[questionId] || 'javascript';
-    const testCases = (Array.isArray(question.test_cases) ? question.test_cases : []) as any[];
-    
-    if (testCases.length === 0) {
-      toast({ title: 'No Test Cases', description: 'This question has no test cases defined', variant: 'destructive' });
-      return;
-    }
-    
-    setIsRunningTests(true);
-
-    try {
-      const response = await supabase.functions.invoke('evaluate-code', {
-        body: { code, language, testCases }
-      });
-
-      if (response.error) {
-        throw new Error(response.error.message);
-      }
-
-      const result = response.data;
-      
-      setTestResults(prev => ({
-        ...prev,
-        [questionId]: { 
-          passed: result.passed, 
-          total: result.total,
-          results: result.results 
-        }
-      }));
-      
-      toast({
-        title: 'Tests Run',
-        description: `${result.passed}/${result.total} test cases passed`,
-        variant: result.passed === result.total ? 'default' : 'destructive'
-      });
-    } catch (error: any) {
-      console.error('Test run error:', error);
-      toast({ 
-        title: 'Error', 
-        description: error.message || 'Could not evaluate code. Please try again.', 
-        variant: 'destructive' 
-      });
-    } finally {
-      setIsRunningTests(false);
-    }
+  const handleAnswerChange = (questionId: string, answer: string) => {
+    setAnswers(prev => ({ ...prev, [questionId]: answer }));
   };
 
   const handleSubmitExam = async () => {
@@ -318,110 +205,82 @@ const StudentExams: React.FC = () => {
     setShowConfirmSubmit(false);
 
     try {
-      let totalTestsPassed = 0;
-      let totalTestCases = 0;
+      // Fetch correct answers and calculate score
+      const { data: questionsWithAnswers } = await supabase
+        .from('quiz_questions')
+        .select('id, correct_answer, marks')
+        .eq('assessment_id', activeExam.id);
 
-      // Save each answer and calculate score based on test cases passed
-      for (const question of questions) {
-        const code = answers[question.id] || '';
-        const language = questionLanguages[question.id] || 'javascript';
-        const tcLength = Array.isArray(question.test_cases) ? question.test_cases.length : 0;
-        const result = testResults[question.id] || { passed: 0, total: tcLength };
-        const score = Math.round((result.passed / (result.total || 1)) * question.points);
+      let totalScore = 0;
+      const totalMarks = questionsWithAnswers?.reduce((sum, q) => sum + q.marks, 0) || 0;
+
+      // Save each response
+      for (const question of questionsWithAnswers || []) {
+        const selectedAnswer = answers[question.id];
+        const isCorrect = selectedAnswer === question.correct_answer;
+        const marksObtained = isCorrect ? question.marks : 0;
         
-        totalTestsPassed += result.passed;
-        totalTestCases += result.total || tcLength;
+        if (isCorrect) {
+          totalScore += question.marks;
+        }
 
-        await supabase.from('code_submissions').upsert({
+        await supabase.from('quiz_responses').upsert({
           attempt_id: currentAttempt.id,
           question_id: question.id,
-          code,
-          language,
-          test_cases_passed: result.passed,
-          total_test_cases: result.total || tcLength,
-          score,
+          selected_answer: selectedAnswer || null,
+          is_correct: isCorrect,
+          marks_obtained: marksObtained,
         }, { onConflict: 'attempt_id,question_id' });
       }
 
-      // Calculate percentage based on test cases passed (not points)
-      const percentageScore = totalTestCases > 0 
-        ? Math.round((totalTestsPassed / totalTestCases) * 100) 
+      const percentageScore = totalMarks > 0 
+        ? Math.round((totalScore / totalMarks) * 100) 
         : 0;
-      const passed = percentageScore >= activeExam.passing_score;
 
-      // Update attempt
+      // Update attempt - but don't mark as passed/failed yet (admin confirms)
       await supabase
         .from('exam_attempts')
         .update({
           submitted_at: new Date().toISOString(),
-          total_score: totalTestsPassed,
+          total_score: totalScore,
           percentage_score: percentageScore,
-          status: passed ? 'passed' : 'failed',
+          status: 'submitted', // Not passed/failed until admin confirms
         })
         .eq('id', currentAttempt.id);
 
-      // If passed, update application status
-      if (passed) {
-        const { data: application } = await supabase
-          .from('applications')
-          .select('id')
-          .eq('job_id', activeExam.job_id)
-          .eq('student_id', user?.id)
-          .single();
+      // Notify placement admin about submission
+      const { data: placementAdmins } = await supabase
+        .from('user_roles')
+        .select('user_id')
+        .eq('role', 'placement');
 
-        if (application) {
-          await supabase
-            .from('applications')
-            .update({ status: 'shortlisted' })
-            .eq('id', application.id);
-        }
-      }
-
-      // Notify the student's mentor
-      if (user?.id) {
-        const { data: mentorRequest } = await supabase
-          .from('mentor_requests')
-          .select('mentor_id')
-          .eq('student_id', user.id)
-          .eq('status', 'approved')
+      if (placementAdmins) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('full_name')
+          .eq('user_id', user?.id)
           .maybeSingle();
 
-        if (mentorRequest?.mentor_id) {
-          const { data: profile } = await supabase
-            .from('profiles')
-            .select('full_name')
-            .eq('user_id', user.id)
-            .maybeSingle();
-
+        for (const admin of placementAdmins) {
           await supabase.from('notifications').insert({
-            user_id: mentorRequest.mentor_id,
-            title: passed ? 'Student Passed Assessment 🎉' : 'Student Assessment Result',
-            message: `${profile?.full_name || 'Your student'} ${passed ? 'passed' : 'did not pass'} the ${activeExam.title} assessment with ${percentageScore}% (${totalTestsPassed}/${totalTestCases} test cases)`,
-            link: '/faculty/students',
+            user_id: admin.user_id,
+            title: 'Quiz Submission',
+            message: `${profile?.full_name || 'A student'} submitted ${activeExam.title} with ${percentageScore}% (${totalScore}/${totalMarks} marks)`,
+            link: '/placement/exam-results',
           });
         }
       }
 
-      if (passed) {
-        toast({
-          title: 'Congratulations! 🎉',
-          description: `You passed with ${percentageScore}% (${totalTestsPassed}/${totalTestCases} test cases passed)!`,
-        });
-      } else {
-        toast({
-          title: 'Assessment Completed',
-          description: `You scored ${percentageScore}% (${totalTestsPassed}/${totalTestCases} test cases). Required: ${activeExam.passing_score}%`,
-          variant: 'destructive',
-        });
-      }
+      toast({
+        title: 'Exam Submitted',
+        description: 'Your exam has been submitted. Results will be announced by the placement cell.',
+      });
 
       // Reset exam state
       setActiveExam(null);
       setQuestions([]);
       setAnswers({});
-      setQuestionLanguages({});
       setCurrentAttempt(null);
-      setTestResults({});
       fetchAssessments();
     } catch (error: any) {
       toast({ title: 'Error', description: error.message, variant: 'destructive' });
@@ -440,6 +299,10 @@ const StudentExams: React.FC = () => {
     return attempts.find(a => a.assessment_id === assessmentId);
   };
 
+  const getAnsweredCount = () => {
+    return Object.keys(answers).filter(k => answers[k]).length;
+  };
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -451,7 +314,7 @@ const StudentExams: React.FC = () => {
   // Active exam view
   if (activeExam && questions.length > 0) {
     const currentQuestion = questions[currentQuestionIndex];
-    const currentResult = testResults[currentQuestion.id];
+    const progress = (getAnsweredCount() / questions.length) * 100;
 
     return (
       <div className="h-[calc(100vh-8rem)] flex flex-col">
@@ -462,7 +325,10 @@ const StudentExams: React.FC = () => {
             <p className="text-sm text-muted-foreground">{activeExam.jobs?.company_name}</p>
           </div>
           <div className="flex items-center gap-4">
-            <div className={`flex items-center gap-2 px-4 py-2 rounded-lg ${timeRemaining < 300 ? 'bg-red-100 text-red-700' : 'bg-muted'}`}>
+            <div className="text-sm text-muted-foreground">
+              Answered: {getAnsweredCount()}/{questions.length}
+            </div>
+            <div className={`flex items-center gap-2 px-4 py-2 rounded-lg ${timeRemaining < 300 ? 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300' : 'bg-muted'}`}>
               <Timer className="w-4 h-4" />
               <span className="font-mono font-bold">{formatTime(timeRemaining)}</span>
             </div>
@@ -472,193 +338,117 @@ const StudentExams: React.FC = () => {
           </div>
         </div>
 
-        <div className="flex-1 grid grid-cols-1 lg:grid-cols-2 gap-0 overflow-hidden">
+        {/* Progress bar */}
+        <div className="px-4 py-2 border-b">
+          <Progress value={progress} className="h-2" />
+        </div>
+
+        <div className="flex-1 grid grid-cols-1 lg:grid-cols-4 gap-0 overflow-hidden">
           {/* Question Panel */}
-          <div className="p-6 overflow-y-auto border-r">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2">
-                <Badge variant="outline">Question {currentQuestionIndex + 1} of {questions.length}</Badge>
-                <Badge variant={currentQuestion.difficulty === 'easy' ? 'secondary' : currentQuestion.difficulty === 'medium' ? 'default' : 'destructive'}>
-                  {currentQuestion.difficulty}
-                </Badge>
-                <Badge variant="outline">{currentQuestion.points} pts</Badge>
-              </div>
-            </div>
-
-            <h2 className="text-xl font-bold mb-4">{currentQuestion.title}</h2>
-            <div className="prose prose-sm max-w-none">
-              <pre className="whitespace-pre-wrap text-sm bg-muted p-4 rounded-lg">
-                {currentQuestion.description}
-              </pre>
-            </div>
-
-            {currentQuestion.constraints && (
-              <div className="mt-4">
-                <h3 className="font-semibold text-sm mb-2">Constraints:</h3>
-                <p className="text-sm text-muted-foreground">{currentQuestion.constraints}</p>
-              </div>
-            )}
-
-            {/* Test Cases Section */}
-            {Array.isArray(currentQuestion.test_cases) && currentQuestion.test_cases.length > 0 && (
-              <div className="mt-4">
-                <h3 className="font-semibold text-sm mb-2">Test Cases:</h3>
-                <div className="space-y-3">
-                  {(currentQuestion.test_cases as { input: Record<string, unknown>; expected: unknown }[]).slice(0, 3).map((tc, idx) => (
-                    <div key={idx} className="bg-muted/50 p-3 rounded-lg border text-sm font-mono">
-                      <div className="flex flex-col gap-1">
-                        <div>
-                          <span className="text-muted-foreground">Input: </span>
-                          <span className="text-foreground">
-                            {Object.entries(tc.input).map(([key, value]) => `${key} = ${JSON.stringify(value)}`).join(', ')}
-                          </span>
-                        </div>
-                        <div>
-                          <span className="text-muted-foreground">Expected Output: </span>
-                          <span className="text-green-600 dark:text-green-400 font-semibold">{JSON.stringify(tc.expected)}</span>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                  {(currentQuestion.test_cases as unknown[]).length > 3 && (
-                    <p className="text-xs text-muted-foreground">
-                      + {(currentQuestion.test_cases as unknown[]).length - 3} hidden test cases
-                    </p>
-                  )}
+          <div className="lg:col-span-3 p-6 overflow-y-auto">
+            <Card variant="outline" className="p-6">
+              <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline">Question {currentQuestionIndex + 1} of {questions.length}</Badge>
+                  <Badge variant="secondary">{currentQuestion.marks} marks</Badge>
                 </div>
               </div>
-            )}
 
-            {/* Question Navigation */}
-            <div className="flex items-center justify-between mt-6 pt-4 border-t">
-              <Button
-                variant="outline"
-                onClick={() => setCurrentQuestionIndex(prev => Math.max(0, prev - 1))}
-                disabled={currentQuestionIndex === 0}
-              >
-                <ChevronLeft className="w-4 h-4 mr-1" />
-                Previous
-              </Button>
-              <div className="flex gap-2">
-                {questions.map((_, i) => (
-                  <button
-                    key={i}
-                    onClick={() => setCurrentQuestionIndex(i)}
-                    className={`w-8 h-8 rounded-full text-sm font-medium ${
-                      i === currentQuestionIndex 
-                        ? 'bg-primary text-primary-foreground' 
-                        : testResults[questions[i].id]?.passed === testResults[questions[i].id]?.total && testResults[questions[i].id]?.total > 0
-                        ? 'bg-green-500 text-white'
-                        : 'bg-muted'
-                    }`}
-                  >
-                    {i + 1}
-                  </button>
-                ))}
-              </div>
-              <Button
-                variant="outline"
-                onClick={() => setCurrentQuestionIndex(prev => Math.min(questions.length - 1, prev + 1))}
-                disabled={currentQuestionIndex === questions.length - 1}
-              >
-                Next
-                <ChevronRight className="w-4 h-4 ml-1" />
-              </Button>
-            </div>
-          </div>
+              <h2 className="text-xl font-semibold mb-6">{currentQuestion.question_text}</h2>
 
-          {/* Code Editor Panel */}
-          <div className="flex flex-col overflow-hidden">
-            <div className="p-3 bg-muted/50 border-b flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <span className="text-sm font-medium">Language:</span>
-                <Select
-                  value={questionLanguages[currentQuestion.id] || 'javascript'}
-                  onValueChange={(value) => handleLanguageChange(value as ProgrammingLanguage)}
+              <RadioGroup
+                value={answers[currentQuestion.id] || ''}
+                onValueChange={(value) => handleAnswerChange(currentQuestion.id, value)}
+                className="space-y-4"
+              >
+                {['a', 'b', 'c', 'd'].map((option) => {
+                  const optionText = currentQuestion[`option_${option}` as keyof QuizQuestion] as string;
+                  const isSelected = answers[currentQuestion.id] === option;
+                  
+                  return (
+                    <div 
+                      key={option}
+                      className={`flex items-center space-x-3 p-4 rounded-lg border-2 cursor-pointer transition-all ${
+                        isSelected 
+                          ? 'border-primary bg-primary/5' 
+                          : 'border-border hover:border-primary/50'
+                      }`}
+                      onClick={() => handleAnswerChange(currentQuestion.id, option)}
+                    >
+                      <RadioGroupItem value={option} id={`option-${option}`} />
+                      <Label htmlFor={`option-${option}`} className="flex-1 cursor-pointer text-base">
+                        <span className="font-semibold mr-2">{option.toUpperCase()}.</span>
+                        {optionText}
+                      </Label>
+                    </div>
+                  );
+                })}
+              </RadioGroup>
+
+              {/* Navigation */}
+              <div className="flex items-center justify-between mt-8 pt-6 border-t">
+                <Button
+                  variant="outline"
+                  onClick={() => setCurrentQuestionIndex(prev => Math.max(0, prev - 1))}
+                  disabled={currentQuestionIndex === 0}
                 >
-                  <SelectTrigger className="w-[140px] h-8">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {LANGUAGE_OPTIONS.map((lang) => (
-                      <SelectItem key={lang.value} value={lang.value}>
-                        {lang.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="flex items-center gap-2">
-                {currentResult && (
-                  <Badge variant={currentResult.passed === currentResult.total ? 'default' : 'destructive'}>
-                    {currentResult.passed}/{currentResult.total} tests passed
-                  </Badge>
-                )}
-                <Button 
-                  size="sm" 
-                  variant="outline" 
-                  onClick={() => runTests(currentQuestion.id)}
-                  disabled={isRunningTests}
+                  <ChevronLeft className="w-4 h-4 mr-1" />
+                  Previous
+                </Button>
+                
+                <div className="text-sm text-muted-foreground">
+                  {currentQuestionIndex + 1} / {questions.length}
+                </div>
+
+                <Button
+                  variant="outline"
+                  onClick={() => setCurrentQuestionIndex(prev => Math.min(questions.length - 1, prev + 1))}
+                  disabled={currentQuestionIndex === questions.length - 1}
                 >
-                  {isRunningTests ? (
-                    <Loader2 className="w-4 h-4 mr-1 animate-spin" />
-                  ) : (
-                    <Play className="w-4 h-4 mr-1" />
-                  )}
-                  Run Tests
+                  Next
+                  <ChevronRight className="w-4 h-4 ml-1" />
                 </Button>
               </div>
+            </Card>
+          </div>
+
+          {/* Question Navigator */}
+          <div className="p-4 bg-muted/30 border-l overflow-y-auto">
+            <h3 className="font-semibold mb-4">Questions</h3>
+            <div className="grid grid-cols-5 gap-2">
+              {questions.map((q, index) => {
+                const isAnswered = !!answers[q.id];
+                const isCurrent = index === currentQuestionIndex;
+                
+                return (
+                  <button
+                    key={q.id}
+                    onClick={() => setCurrentQuestionIndex(index)}
+                    className={`
+                      w-10 h-10 rounded-lg flex items-center justify-center text-sm font-medium transition-all
+                      ${isCurrent ? 'ring-2 ring-primary ring-offset-2' : ''}
+                      ${isAnswered 
+                        ? 'bg-green-500 text-white' 
+                        : 'bg-muted hover:bg-muted/80'
+                      }
+                    `}
+                  >
+                    {index + 1}
+                  </button>
+                );
+              })}
             </div>
             
-            {/* Code Editor */}
-            <Textarea
-              value={answers[currentQuestion.id] || ''}
-              onChange={(e) => setAnswers(prev => ({ ...prev, [currentQuestion.id]: e.target.value }))}
-              className="flex-1 font-mono text-sm resize-none rounded-none border-0 focus-visible:ring-0 min-h-[300px]"
-              placeholder="Write your code here..."
-            />
-            
-            {/* Test Results Panel */}
-            {currentResult?.results && currentResult.results.length > 0 && (
-              <div className="border-t bg-muted/30 p-3 max-h-[200px] overflow-y-auto">
-                <h4 className="text-sm font-semibold mb-2">Test Results:</h4>
-                <div className="space-y-2">
-                  {currentResult.results.map((result, idx) => (
-                    <div 
-                      key={idx} 
-                      className={`p-2 rounded-md border text-xs font-mono ${
-                        result.passed 
-                          ? 'bg-green-50 dark:bg-green-950/30 border-green-200 dark:border-green-800' 
-                          : 'bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800'
-                      }`}
-                    >
-                      <div className="flex items-center gap-2 mb-1">
-                        {result.passed ? (
-                          <CheckCircle className="w-3 h-3 text-green-600" />
-                        ) : (
-                          <XCircle className="w-3 h-3 text-red-600" />
-                        )}
-                        <span className={result.passed ? 'text-green-700 dark:text-green-400' : 'text-red-700 dark:text-red-400'}>
-                          Test Case {idx + 1}: {result.passed ? 'Passed' : 'Failed'}
-                        </span>
-                      </div>
-                      <div className="pl-5 space-y-0.5 text-muted-foreground">
-                        <div>Input: {JSON.stringify(result.input)}</div>
-                        <div>Expected: <span className="text-green-600">{JSON.stringify(result.expected)}</span></div>
-                        {!result.passed && (
-                          <>
-                            <div>Got: <span className="text-red-600">{result.actual !== null ? JSON.stringify(result.actual) : 'null'}</span></div>
-                            {result.error && (
-                              <div className="text-red-500">Error: {result.error}</div>
-                            )}
-                          </>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
+            <div className="mt-6 space-y-2 text-sm">
+              <div className="flex items-center gap-2">
+                <div className="w-4 h-4 rounded bg-green-500" />
+                <span>Answered ({getAnsweredCount()})</span>
               </div>
-            )}
+              <div className="flex items-center gap-2">
+                <div className="w-4 h-4 rounded bg-muted border" />
+                <span>Not Answered ({questions.length - getAnsweredCount()})</span>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -668,41 +458,41 @@ const StudentExams: React.FC = () => {
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <AlertTriangle className="w-5 h-5 text-yellow-500" />
-                Submit Exam?
+                Confirm Submission
               </DialogTitle>
               <DialogDescription>
-                Are you sure you want to submit? You cannot make changes after submission.
+                Are you sure you want to submit your exam?
               </DialogDescription>
             </DialogHeader>
-            <div className="space-y-2 py-4">
-              <p className="text-sm">Questions answered:</p>
-              <div className="flex gap-2">
-                {questions.map((q, i) => {
-                  const result = testResults[q.id];
-                  const hasCode = (answers[q.id]?.length || 0) > 50;
-                  return (
-                    <div
-                      key={q.id}
-                      className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-medium ${
-                        result?.passed === result?.total && result?.total > 0
-                          ? 'bg-green-500 text-white'
-                          : hasCode
-                          ? 'bg-yellow-500 text-white'
-                          : 'bg-muted text-muted-foreground'
-                      }`}
-                    >
-                      {i + 1}
-                    </div>
-                  );
-                })}
+            
+            <div className="py-4">
+              <div className="p-4 bg-muted rounded-lg space-y-2">
+                <p>Questions Answered: <strong>{getAnsweredCount()}</strong> / {questions.length}</p>
+                <p>Unanswered: <strong>{questions.length - getAnsweredCount()}</strong></p>
+                <p>Time Remaining: <strong>{formatTime(timeRemaining)}</strong></p>
               </div>
+              
+              {questions.length - getAnsweredCount() > 0 && (
+                <p className="text-sm text-yellow-600 dark:text-yellow-400 mt-4">
+                  Warning: You have {questions.length - getAnsweredCount()} unanswered questions!
+                </p>
+              )}
             </div>
+
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => setShowConfirmSubmit(false)}>
                 Continue Exam
               </Button>
-              <Button variant="destructive" onClick={handleSubmitExam} disabled={isSubmitting}>
-                {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+              <Button 
+                variant="destructive" 
+                onClick={handleSubmitExam}
+                disabled={isSubmitting}
+              >
+                {isSubmitting ? (
+                  <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                ) : (
+                  <Send className="w-4 h-4 mr-2" />
+                )}
                 Submit Exam
               </Button>
             </div>
@@ -712,24 +502,24 @@ const StudentExams: React.FC = () => {
     );
   }
 
-  // Exams list view
+  // Assessment list view
   return (
     <div className="space-y-6">
       <motion.div
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
       >
-        <h1 className="text-3xl font-heading font-bold text-foreground">Online Assessments</h1>
-        <p className="text-muted-foreground mt-1">Complete coding assessments for your applications</p>
+        <h1 className="text-3xl font-heading font-bold text-foreground">Online Exams</h1>
+        <p className="text-muted-foreground mt-1">Take quiz assessments for your job applications</p>
       </motion.div>
 
       {assessments.length === 0 ? (
-        <Card variant="elevated">
+        <Card variant="glass">
           <CardContent className="py-12 text-center">
             <ClipboardList className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
-            <p className="text-muted-foreground">No assessments available</p>
-            <p className="text-sm text-muted-foreground mt-1">
-              Assessments will appear here once your applications are approved by faculty
+            <h3 className="text-lg font-semibold mb-2">No Assessments Available</h3>
+            <p className="text-muted-foreground">
+              Assessments will appear here once your job applications are approved by faculty.
             </p>
           </CardContent>
         </Card>
@@ -737,8 +527,12 @@ const StudentExams: React.FC = () => {
         <div className="grid gap-4">
           {assessments.map((assessment, index) => {
             const attempt = getAttemptForAssessment(assessment.id);
-            const isCompleted = attempt && attempt.status !== 'in_progress';
-
+            const canStart = !attempt || attempt.status === 'in_progress';
+            const hasSubmitted = attempt?.status === 'submitted';
+            const isPassed = attempt?.status === 'passed';
+            const isFailed = attempt?.status === 'failed';
+            const isConfirmed = attempt?.result_confirmed;
+            
             return (
               <motion.div
                 key={assessment.id}
@@ -746,47 +540,92 @@ const StudentExams: React.FC = () => {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: index * 0.1 }}
               >
-                <Card variant="interactive" className="hover:shadow-lg transition-shadow">
+                <Card variant="elevated" className="hover:shadow-lg transition-shadow">
                   <CardContent className="p-6">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-4">
+                    <div className="flex items-start justify-between">
+                      <div className="flex items-start gap-4">
                         <div className="w-14 h-14 rounded-xl bg-primary/10 flex items-center justify-center">
-                          <Code className="w-7 h-7 text-primary" />
+                          <FileQuestion className="w-7 h-7 text-primary" />
                         </div>
                         <div>
                           <h3 className="text-lg font-semibold">{assessment.title}</h3>
-                          <p className="text-muted-foreground">
+                          <p className="text-sm text-muted-foreground">
                             {assessment.jobs?.title} • {assessment.jobs?.company_name}
                           </p>
-                          <div className="flex items-center gap-4 mt-2 text-sm text-muted-foreground">
+                          {assessment.description && (
+                            <p className="text-sm text-muted-foreground mt-1 line-clamp-2">
+                              {assessment.description}
+                            </p>
+                          )}
+                          <div className="flex items-center gap-4 mt-3 text-sm text-muted-foreground">
                             <span className="flex items-center gap-1">
                               <Clock className="w-4 h-4" />
-                              {assessment.duration_minutes} minutes
+                              {assessment.duration_minutes} mins
                             </span>
                             <span className="flex items-center gap-1">
+                              <FileQuestion className="w-4 h-4" />
+                              {assessment.total_marks} marks
+                            </span>
+                            <span className="flex items-center gap-1">
+                              <CheckCircle className="w-4 h-4" />
                               Pass: {assessment.passing_score}%
                             </span>
                           </div>
                         </div>
                       </div>
-                      <div className="text-right">
-                        {isCompleted ? (
-                          <div className="space-y-2">
-                            <Badge variant={attempt.status === 'passed' ? 'default' : 'destructive'} className="flex items-center gap-1">
-                              {attempt.status === 'passed' ? (
-                                <CheckCircle className="w-3 h-3" />
-                              ) : (
-                                <XCircle className="w-3 h-3" />
-                              )}
-                              {attempt.status === 'passed' ? 'Passed' : 'Failed'}
-                            </Badge>
-                            <p className="text-2xl font-bold">{attempt.percentage_score}%</p>
-                          </div>
-                        ) : (
+
+                      <div className="flex flex-col items-end gap-2">
+                        {!attempt && (
                           <Button onClick={() => startExam(assessment)} className="gap-2">
                             <Play className="w-4 h-4" />
-                            {attempt ? 'Continue' : 'Start Exam'}
+                            Start Exam
                           </Button>
+                        )}
+                        
+                        {attempt?.status === 'in_progress' && (
+                          <Button onClick={() => startExam(assessment)} variant="secondary" className="gap-2">
+                            <Play className="w-4 h-4" />
+                            Continue Exam
+                          </Button>
+                        )}
+                        
+                        {hasSubmitted && !isConfirmed && (
+                          <Badge className="bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300">
+                            <HelpCircle className="w-3 h-3 mr-1" />
+                            Awaiting Results
+                          </Badge>
+                        )}
+                        
+                        {isConfirmed && isPassed && (
+                          <div className="text-right">
+                            <Badge className="bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300">
+                              <CheckCircle className="w-3 h-3 mr-1" />
+                              Passed ({attempt?.percentage_score}%)
+                            </Badge>
+                            {attempt?.next_round_info && (
+                              <p className="text-sm text-green-600 dark:text-green-400 mt-2">
+                                {attempt.next_round_info}
+                              </p>
+                            )}
+                            {!attempt?.next_round_info && (
+                              <p className="text-sm text-green-600 dark:text-green-400 mt-2">
+                                Interview will be scheduled soon!
+                              </p>
+                            )}
+                          </div>
+                        )}
+                        
+                        {isConfirmed && isFailed && (
+                          <Badge variant="destructive">
+                            <XCircle className="w-3 h-3 mr-1" />
+                            Failed ({attempt?.percentage_score}%)
+                          </Badge>
+                        )}
+
+                        {attempt && attempt.submitted_at && (
+                          <p className="text-xs text-muted-foreground">
+                            Submitted: {format(new Date(attempt.submitted_at), 'MMM dd, yyyy HH:mm')}
+                          </p>
                         )}
                       </div>
                     </div>

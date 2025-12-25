@@ -212,14 +212,14 @@ const JobPostingForm: React.FC<JobPostingFormProps> = ({ open, onOpenChange, com
             </div>
             
             <div className="space-y-2">
-              <Label htmlFor="min_cgpa">Minimum CGPA</Label>
+              <Label htmlFor="min_cgpa">Minimum CGPA (out of 10)</Label>
               <Input
                 id="min_cgpa"
                 type="number"
                 step="0.1"
                 min="0"
-                max="4"
-                placeholder="3.0"
+                max="10"
+                placeholder="7.0"
                 value={formData.min_cgpa}
                 onChange={(e) => setFormData(prev => ({ ...prev, min_cgpa: e.target.value }))}
               />
