@@ -282,6 +282,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "exam_attempts_application_id_fkey"
+            columns: ["application_id"]
+            isOneToOne: false
+            referencedRelation: "student_applications_view"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "exam_attempts_assessment_id_fkey"
             columns: ["assessment_id"]
             isOneToOne: false
@@ -363,6 +370,13 @@ export type Database = {
             columns: ["application_id"]
             isOneToOne: false
             referencedRelation: "applications"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "interview_schedules_application_id_fkey"
+            columns: ["application_id"]
+            isOneToOne: false
+            referencedRelation: "student_applications_view"
             referencedColumns: ["id"]
           },
         ]
@@ -627,7 +641,50 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      student_applications_view: {
+        Row: {
+          created_at: string | null
+          faculty_approved_at: string | null
+          faculty_id: string | null
+          id: string | null
+          job_id: string | null
+          match_score: number | null
+          status: Database["public"]["Enums"]["application_status"] | null
+          student_id: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          faculty_approved_at?: string | null
+          faculty_id?: string | null
+          id?: string | null
+          job_id?: string | null
+          match_score?: number | null
+          status?: Database["public"]["Enums"]["application_status"] | null
+          student_id?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          faculty_approved_at?: string | null
+          faculty_id?: string | null
+          id?: string | null
+          job_id?: string | null
+          match_score?: number | null
+          status?: Database["public"]["Enums"]["application_status"] | null
+          student_id?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "applications_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "jobs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Functions: {
       get_user_role: {
