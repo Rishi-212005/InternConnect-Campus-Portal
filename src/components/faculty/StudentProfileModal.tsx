@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -21,8 +21,9 @@ import {
   Download,
   ExternalLink,
   Star,
-  MapPin,
+  Loader2,
 } from 'lucide-react';
+import { supabase } from '@/integrations/supabase/client';
 
 interface StudentProfileModalProps {
   isOpen: boolean;
@@ -49,10 +50,51 @@ const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
   student,
 }) => {
   const initials = student.full_name?.split(' ').map(n => n[0]).join('').toUpperCase() || 'S';
+  const [isLoadingResume, setIsLoadingResume] = useState(false);
 
-  const handleDownloadResume = () => {
-    if (student.resume_url) {
+  const handleDownloadResume = async () => {
+    if (!student.resume_url) return;
+    
+    setIsLoadingResume(true);
+    
+    try {
+      // Check if it's a Supabase storage URL
+      if (student.resume_url.includes('supabase') || student.resume_url.startsWith('resumes/')) {
+        // Extract the file path from the URL
+        let filePath = student.resume_url;
+        
+        // If it's a full URL, extract the path
+        if (student.resume_url.includes('/storage/v1/object/')) {
+          const match = student.resume_url.match(/\/resumes\/(.+)$/);
+          if (match) {
+            filePath = match[1];
+          }
+        } else if (student.resume_url.startsWith('resumes/')) {
+          filePath = student.resume_url.replace('resumes/', '');
+        }
+        
+        // Get a signed URL for the private resumes bucket
+        const { data, error } = await supabase.storage
+          .from('resumes')
+          .createSignedUrl(filePath, 3600); // 1 hour expiry
+        
+        if (error) {
+          console.error('Error getting signed URL:', error);
+          // Fallback to direct URL
+          window.open(student.resume_url, '_blank');
+        } else if (data?.signedUrl) {
+          window.open(data.signedUrl, '_blank');
+        }
+      } else {
+        // External URL, open directly
+        window.open(student.resume_url, '_blank');
+      }
+    } catch (error) {
+      console.error('Error opening resume:', error);
+      // Fallback to direct URL
       window.open(student.resume_url, '_blank');
+    } finally {
+      setIsLoadingResume(false);
     }
   };
 
@@ -202,12 +244,16 @@ const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
                   <div className="flex items-center gap-2">
                     <FileText className="w-8 h-8 text-primary" />
                     <div>
-                      <p className="font-medium">Resume.pdf</p>
+                      <p className="font-medium">Resume</p>
                       <p className="text-sm text-muted-foreground">Click to view or download</p>
                     </div>
                   </div>
-                  <Button onClick={handleDownloadResume} variant="outline" className="gap-2">
-                    <Download className="w-4 h-4" />
+                  <Button onClick={handleDownloadResume} variant="outline" className="gap-2" disabled={isLoadingResume}>
+                    {isLoadingResume ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Download className="w-4 h-4" />
+                    )}
                     View Resume
                   </Button>
                 </div>
