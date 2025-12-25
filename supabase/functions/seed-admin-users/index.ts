@@ -5,23 +5,23 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// Admin users to create
+// Fixed admin users with predefined credentials
 const adminUsers = [
   {
-    email: 'placementcell@gmail.com',
-    password: 'placementcell@2025',
+    email: 'placementadmin@gmail.com',
+    password: 'placementadmin@2025',
     full_name: 'Placement Cell Admin',
     role: 'placement' as const,
   },
   {
-    email: 'codecrewadmin@gmail.com',
-    password: 'codecrewadmin@2025',
+    email: 'systemadmin@gmail.com',
+    password: 'systemadmin@2025',
     full_name: 'System Administrator',
     role: 'admin' as const,
   },
   {
-    email: 'codecrewrecruiter@gmail.com',
-    password: 'codecrewrecruiter@2025',
+    email: 'recruiter@gmail.com',
+    password: 'recruiter@2025',
     full_name: 'Default Recruiter',
     role: 'recruiter' as const,
   },
@@ -54,8 +54,20 @@ Deno.serve(async (req) => {
       const existingUser = existingUsers?.users?.find(u => u.email === user.email);
 
       if (existingUser) {
-        console.log(`User ${user.email} already exists, skipping creation`);
-        results.push({ email: user.email, status: 'already_exists' });
+        console.log(`User ${user.email} already exists, updating password...`);
+        
+        // Update password for existing user
+        const { error: updateError } = await supabaseAdmin.auth.admin.updateUserById(
+          existingUser.id,
+          { password: user.password, email_confirm: true }
+        );
+        
+        if (updateError) {
+          console.error(`Error updating user ${user.email}:`, updateError);
+          results.push({ email: user.email, status: 'update_error', error: updateError.message });
+        } else {
+          results.push({ email: user.email, status: 'password_updated' });
+        }
         continue;
       }
 
@@ -109,7 +121,7 @@ Deno.serve(async (req) => {
           .from('recruiter_profiles')
           .insert({
             user_id: userId,
-            company_name: 'CodeCrew Recruiting',
+            company_name: 'Default Company',
             is_verified: true,
           });
         if (recruiterError) {

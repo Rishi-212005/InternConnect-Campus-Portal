@@ -1,1 +1,10 @@
 project_id = "dqsrldzagcyffxcvxfrn"
+
+[functions.seed-admin-users]
+verify_jwt = false
+
+[functions.evaluate-code]
+verify_jwt = false
+
+[functions.send-notification]
+verify_jwt = false
