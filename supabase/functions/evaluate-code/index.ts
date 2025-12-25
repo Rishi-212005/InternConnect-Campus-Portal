@@ -5,13 +5,13 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// Judge0 language IDs
-const LANGUAGE_IDS: Record<string, number> = {
-  javascript: 63,  // Node.js
-  python: 71,      // Python 3
-  java: 62,        // Java
-  c: 50,           // C (GCC)
-  cpp: 54,         // C++ (GCC)
+// Piston API language versions
+const LANGUAGE_VERSIONS: Record<string, { language: string; version: string }> = {
+  javascript: { language: 'javascript', version: '18.15.0' },
+  python: { language: 'python', version: '3.10.0' },
+  java: { language: 'java', version: '15.0.2' },
+  c: { language: 'c', version: '10.2.0' },
+  cpp: { language: 'cpp', version: '10.2.0' },
 };
 
 interface TestCase {
@@ -44,7 +44,6 @@ const generateWrapperCode = (
       return `import json\n${code}\nprint(json.dumps(${functionName}(${argsStr})))`;
     
     case 'java':
-      // For Java, we need a main method wrapper
       return `import com.google.gson.Gson;
 public class Main {
     ${code.replace(/public\s+class\s+\w+\s*\{/, '').replace(/\}\s*$/, '')}
@@ -91,52 +90,46 @@ const extractFunctionName = (code: string, language: string): string | null => {
   return null;
 };
 
-// Submit code to Judge0 and get result
-const executeWithJudge0 = async (
+// Execute code using Piston API (free, no API key required)
+const executeWithPiston = async (
   sourceCode: string,
-  languageId: number,
-  expectedOutput?: string
-): Promise<{ stdout: string | null; stderr: string | null; status: { id: number; description: string }; time: string; memory: number }> => {
-  const rapidApiKey = Deno.env.get('RAPIDAPI_KEY');
+  language: string
+): Promise<{ stdout: string | null; stderr: string | null; error?: string }> => {
+  const langConfig = LANGUAGE_VERSIONS[language];
   
-  if (!rapidApiKey) {
-    throw new Error('RAPIDAPI_KEY is not configured');
+  if (!langConfig) {
+    throw new Error(`Unsupported language: ${language}`);
   }
 
-  const judge0Url = 'https://judge0-ce.p.rapidapi.com';
-  
-  // Create submission
-  const createResponse = await fetch(`${judge0Url}/submissions?base64_encoded=true&wait=true`, {
+  const response = await fetch('https://emkc.org/api/v2/piston/execute', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'X-RapidAPI-Key': rapidApiKey,
-      'X-RapidAPI-Host': 'judge0-ce.p.rapidapi.com',
     },
     body: JSON.stringify({
-      source_code: btoa(sourceCode),
-      language_id: languageId,
-      expected_output: expectedOutput ? btoa(expectedOutput) : undefined,
-      cpu_time_limit: 5,
-      memory_limit: 128000,
+      language: langConfig.language,
+      version: langConfig.version,
+      files: [{ content: sourceCode }],
     }),
   });
 
-  if (!createResponse.ok) {
-    const errorText = await createResponse.text();
-    console.error('Judge0 API error:', createResponse.status, errorText);
-    throw new Error(`Judge0 API error: ${createResponse.status} - ${errorText}`);
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error('Piston API error:', response.status, errorText);
+    throw new Error(`Piston API error: ${response.status} - ${errorText}`);
   }
 
-  const result = await createResponse.json();
+  const result = await response.json();
   
-  return {
-    stdout: result.stdout ? atob(result.stdout) : null,
-    stderr: result.stderr ? atob(result.stderr) : null,
-    status: result.status,
-    time: result.time || '0',
-    memory: result.memory || 0,
-  };
+  if (result.run) {
+    return {
+      stdout: result.run.stdout || null,
+      stderr: result.run.stderr || null,
+      error: result.run.code !== 0 ? result.run.stderr : undefined,
+    };
+  }
+
+  return { stdout: null, stderr: null, error: 'Unknown execution error' };
 };
 
 // Compare outputs with tolerance for different formats
@@ -187,10 +180,9 @@ serve(async (req) => {
       );
     }
 
-    const languageId = LANGUAGE_IDS[language];
-    if (!languageId) {
+    if (!LANGUAGE_VERSIONS[language]) {
       return new Response(
-        JSON.stringify({ error: `Unsupported language: ${language}` }),
+        JSON.stringify({ error: `Unsupported language: ${language}. Supported: javascript, python, java, c, cpp` }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
@@ -218,7 +210,7 @@ serve(async (req) => {
 
     console.log(`Found function name: ${fnName}`);
 
-    const results: { passed: boolean; input: unknown; expected: unknown; actual: unknown; error?: string; executionTime?: string }[] = [];
+    const results: { passed: boolean; input: unknown; expected: unknown; actual: unknown; error?: string }[] = [];
     let passed = 0;
 
     // Run each test case
@@ -227,19 +219,18 @@ serve(async (req) => {
         const wrappedCode = generateWrapperCode(code, language, fnName, tc.input);
         console.log(`Executing test case with input: ${JSON.stringify(tc.input)}`);
         
-        const execution = await executeWithJudge0(wrappedCode, languageId);
+        const execution = await executeWithPiston(wrappedCode, language);
         
-        console.log(`Execution result: status=${execution.status.description}, stdout=${execution.stdout}, stderr=${execution.stderr}`);
+        console.log(`Execution result: stdout=${execution.stdout}, stderr=${execution.stderr}`);
         
-        // Check if execution was successful
-        if (execution.status.id !== 3) { // 3 = Accepted
+        // Check if execution had errors
+        if (execution.error || (execution.stderr && execution.stderr.trim())) {
           results.push({
             passed: false,
             input: tc.input,
             expected: tc.expected,
             actual: null,
-            error: execution.stderr || execution.status.description,
-            executionTime: execution.time,
+            error: execution.error || execution.stderr || undefined,
           });
           continue;
         }
@@ -249,13 +240,22 @@ serve(async (req) => {
         
         if (isPassed) passed++;
         
+        let actualValue = null;
+        try {
+          actualValue = execution.stdout ? JSON.parse(execution.stdout.trim()) : null;
+        } catch {
+          actualValue = execution.stdout?.trim() || null;
+        }
+        
         results.push({
           passed: isPassed,
           input: tc.input,
           expected: tc.expected,
-          actual: execution.stdout?.trim() || null,
-          executionTime: execution.time,
+          actual: actualValue,
         });
+        
+        // Small delay between test cases
+        await new Promise(resolve => setTimeout(resolve, 50));
         
       } catch (e: unknown) {
         console.error('Test case execution error:', e);
