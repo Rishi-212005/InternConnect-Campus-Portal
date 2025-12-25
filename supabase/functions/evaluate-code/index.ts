@@ -39,11 +39,9 @@ const generateWrapperCode = (
 
   switch (language) {
     case 'javascript':
-      // For JS, pass arguments using spread from input object values
+      // For JS, pass arguments directly in order
       return `${code}
-const __input = ${inputJson};
-const __args = Object.values(__input);
-console.log(JSON.stringify(${functionName}(...__args)));`;
+console.log(JSON.stringify(${functionName}(${argsStr})));`;
     
     case 'python':
       // For Python, use keyword arguments which is more flexible
