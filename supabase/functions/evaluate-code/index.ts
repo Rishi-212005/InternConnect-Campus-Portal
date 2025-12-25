@@ -5,6 +5,15 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// Judge0 language IDs
+const LANGUAGE_IDS: Record<string, number> = {
+  javascript: 63,  // Node.js
+  python: 71,      // Python 3
+  java: 62,        // Java
+  c: 50,           // C (GCC)
+  cpp: 54,         // C++ (GCC)
+};
+
 interface TestCase {
   input: Record<string, unknown>;
   expected: unknown;
@@ -12,268 +21,145 @@ interface TestCase {
 
 interface EvaluationRequest {
   code: string;
-  language: 'javascript' | 'python' | 'java' | 'c';
+  language: 'javascript' | 'python' | 'java' | 'c' | 'cpp';
   testCases: TestCase[];
   functionName?: string;
 }
 
-// Convert Python code to JavaScript
-const pythonToJs = (code: string): string => {
-  const lines = code.split('\n');
-  const jsLines: string[] = [];
-  const indentStack: number[] = [0];
-  
-  for (let i = 0; i < lines.length; i++) {
-    let line = lines[i];
-    const trimmed = line.trim();
-    
-    if (!trimmed || trimmed.startsWith('#')) continue;
-    
-    // Calculate current indentation
-    const currentIndent = line.search(/\S/);
-    if (currentIndent === -1) continue;
-    
-    // Close blocks when indentation decreases
-    while (indentStack.length > 1 && currentIndent <= indentStack[indentStack.length - 1]) {
-      indentStack.pop();
-      jsLines.push('  '.repeat(indentStack.length) + '}');
-    }
-    
-    // Transform Python to JS
-    let jsLine = trimmed
-      .replace(/\bTrue\b/g, 'true')
-      .replace(/\bFalse\b/g, 'false')
-      .replace(/\bNone\b/g, 'null')
-      .replace(/\band\b/g, '&&')
-      .replace(/\bor\b/g, '||')
-      .replace(/\bnot\s+/g, '!')
-      .replace(/\*\*/g, '**')
-      .replace(/\/\//g, '/ ')  // Integer division (simplified)
-      .replace(/len\(([^)]+)\)/g, '$1.length')
-      .replace(/str\(([^)]+)\)/g, 'String($1)')
-      .replace(/int\(([^)]+)\)/g, 'parseInt($1)')
-      .replace(/float\(([^)]+)\)/g, 'parseFloat($1)')
-      .replace(/abs\(([^)]+)\)/g, 'Math.abs($1)')
-      .replace(/min\(([^)]+)\)/g, 'Math.min($1)')
-      .replace(/max\(([^)]+)\)/g, 'Math.max($1)')
-      .replace(/sum\(([^)]+)\)/g, '$1.reduce((a,b)=>a+b,0)')
-      .replace(/range\((\d+)\)/g, 'Array.from({length:$1},(_,i)=>i)')
-      .replace(/range\((\d+),\s*(\d+)\)/g, 'Array.from({length:$2-$1},(_,i)=>i+$1)');
-    
-    // Handle function definitions
-    if (jsLine.startsWith('def ')) {
-      const match = jsLine.match(/def\s+(\w+)\s*\(([^)]*)\)\s*:/);
-      if (match) {
-        jsLine = `function ${match[1]}(${match[2]}) {`;
-        indentStack.push(currentIndent);
-      }
-    }
-    // Handle if statements
-    else if (jsLine.startsWith('if ') && jsLine.endsWith(':')) {
-      const condition = jsLine.slice(3, -1).trim();
-      jsLine = `if (${condition}) {`;
-      indentStack.push(currentIndent);
-    }
-    // Handle elif
-    else if (jsLine.startsWith('elif ') && jsLine.endsWith(':')) {
-      const condition = jsLine.slice(5, -1).trim();
-      jsLine = `} else if (${condition}) {`;
-    }
-    // Handle else
-    else if (jsLine === 'else:') {
-      jsLine = '} else {';
-    }
-    // Handle for loops
-    else if (jsLine.startsWith('for ') && jsLine.endsWith(':')) {
-      const match = jsLine.match(/for\s+(\w+)\s+in\s+(.+):/);
-      if (match) {
-        const varName = match[1];
-        const iterable = match[2].trim();
-        
-        if (iterable.startsWith('range(')) {
-          const rangeMatch = iterable.match(/range\(([^,)]+)(?:,\s*([^)]+))?\)/);
-          if (rangeMatch) {
-            if (rangeMatch[2]) {
-              jsLine = `for (let ${varName} = ${rangeMatch[1]}; ${varName} < ${rangeMatch[2]}; ${varName}++) {`;
-            } else {
-              jsLine = `for (let ${varName} = 0; ${varName} < ${rangeMatch[1]}; ${varName}++) {`;
-            }
-          }
-        } else {
-          jsLine = `for (const ${varName} of ${iterable}) {`;
-        }
-        indentStack.push(currentIndent);
-      }
-    }
-    // Handle while loops
-    else if (jsLine.startsWith('while ') && jsLine.endsWith(':')) {
-      const condition = jsLine.slice(6, -1).trim();
-      jsLine = `while (${condition}) {`;
-      indentStack.push(currentIndent);
-    }
-    // Handle return statements
-    else if (jsLine.startsWith('return ')) {
-      jsLine = jsLine + ';';
-    }
-    // Handle variable assignments and other statements
-    else if (!jsLine.endsWith('{') && !jsLine.endsWith('}')) {
-      if (!jsLine.endsWith(';')) {
-        jsLine = jsLine + ';';
-      }
-    }
-    
-    jsLines.push('  '.repeat(indentStack.length - 1) + jsLine);
-  }
-  
-  // Close any remaining open blocks
-  while (indentStack.length > 1) {
-    indentStack.pop();
-    jsLines.push('  '.repeat(indentStack.length) + '}');
-  }
-  
-  return jsLines.join('\n');
-};
+// Generate wrapper code to run the function with test input
+const generateWrapperCode = (
+  code: string,
+  language: string,
+  functionName: string,
+  testInput: Record<string, unknown>
+): string => {
+  const args = Object.values(testInput);
+  const argsStr = args.map(v => JSON.stringify(v)).join(', ');
 
-// Convert Java/C code to JavaScript (simplified)
-const javaCToJs = (code: string): string => {
-  // Extract function - handle various patterns
-  const funcMatch = code.match(/(?:public\s+static\s+)?(?:int|long|double|float|String|boolean|void|char)\s+(\w+)\s*\(([^)]*)\)\s*\{([\s\S]*)\}/);
-  
-  if (!funcMatch) {
-    // Try simpler C function pattern
-    const cMatch = code.match(/(\w+)\s+(\w+)\s*\(([^)]*)\)\s*\{([\s\S]*)\}/);
-    if (cMatch) {
-      const fnName = cMatch[2];
-      const params = cMatch[3]
-        .split(',')
-        .map(p => p.trim().split(/\s+/).pop())
-        .filter(Boolean)
-        .join(', ');
-      const body = cMatch[4];
-      return `function ${fnName}(${params}) {${body}}`;
+  switch (language) {
+    case 'javascript':
+      return `${code}\nconsole.log(JSON.stringify(${functionName}(${argsStr})));`;
+    
+    case 'python':
+      return `import json\n${code}\nprint(json.dumps(${functionName}(${argsStr})))`;
+    
+    case 'java':
+      // For Java, we need a main method wrapper
+      return `import com.google.gson.Gson;
+public class Main {
+    ${code.replace(/public\s+class\s+\w+\s*\{/, '').replace(/\}\s*$/, '')}
+    
+    public static void main(String[] args) {
+        Gson gson = new Gson();
+        System.out.println(gson.toJson(${functionName}(${argsStr})));
     }
-    return code;
+}`;
+    
+    case 'c':
+    case 'cpp':
+      return `#include <stdio.h>
+#include <stdlib.h>
+${code}
+
+int main() {
+    printf("%d\\n", ${functionName}(${argsStr}));
+    return 0;
+}`;
+    
+    default:
+      return code;
   }
-  
-  const fnName = funcMatch[1];
-  const params = funcMatch[2]
-    .split(',')
-    .map(p => p.trim().split(/\s+/).pop())
-    .filter(Boolean)
-    .join(', ');
-  const body = funcMatch[3];
-  
-  return `function ${fnName}(${params}) {${body}}`;
 };
 
 // Extract function name from code
 const extractFunctionName = (code: string, language: string): string | null => {
   if (language === 'javascript') {
     const match = code.match(/function\s+(\w+)/);
-    return match ? match[1] : null;
+    if (match) return match[1];
+    const arrowMatch = code.match(/(?:const|let|var)\s+(\w+)\s*=\s*(?:\([^)]*\)|[^=]+)\s*=>/);
+    return arrowMatch ? arrowMatch[1] : null;
   } else if (language === 'python') {
     const match = code.match(/def\s+(\w+)/);
     return match ? match[1] : null;
-  } else if (language === 'java' || language === 'c') {
-    const match = code.match(/(?:public\s+static\s+)?(?:int|long|double|float|String|boolean|void|char)\s+(\w+)\s*\(/);
-    if (match) return match[1];
-    const cMatch = code.match(/\w+\s+(\w+)\s*\(/);
-    return cMatch ? cMatch[1] : null;
+  } else if (language === 'java') {
+    const match = code.match(/(?:public\s+static\s+)?(?:int|long|double|float|String|boolean|void|char|Object)\s+(\w+)\s*\(/);
+    return match ? match[1] : null;
+  } else if (language === 'c' || language === 'cpp') {
+    const match = code.match(/(?:int|long|double|float|char|void)\s+(\w+)\s*\(/);
+    return match ? match[1] : null;
   }
   return null;
 };
 
-// Evaluate code against test cases
-const evaluateCode = (
-  code: string, 
-  language: string, 
-  testCases: TestCase[], 
-  functionName?: string
-): { passed: number; total: number; results: { passed: boolean; input: unknown; expected: unknown; actual: unknown; error?: string }[] } => {
-  const results: { passed: boolean; input: unknown; expected: unknown; actual: unknown; error?: string }[] = [];
-  let passed = 0;
+// Submit code to Judge0 and get result
+const executeWithJudge0 = async (
+  sourceCode: string,
+  languageId: number,
+  expectedOutput?: string
+): Promise<{ stdout: string | null; stderr: string | null; status: { id: number; description: string }; time: string; memory: number }> => {
+  const rapidApiKey = Deno.env.get('RAPIDAPI_KEY');
   
-  console.log(`Evaluating ${language} code with ${testCases.length} test cases`);
-  console.log(`Code:\n${code.substring(0, 200)}...`);
-  
-  // Get function name
-  const fnName = functionName || extractFunctionName(code, language);
-  
-  if (!fnName) {
-    console.error('Could not find function name in code');
-    return {
-      passed: 0,
-      total: testCases.length,
-      results: testCases.map(tc => ({
-        passed: false,
-        input: tc.input,
-        expected: tc.expected,
-        actual: null,
-        error: 'Could not find function name in code'
-      }))
-    };
+  if (!rapidApiKey) {
+    throw new Error('RAPIDAPI_KEY is not configured');
   }
+
+  const judge0Url = 'https://judge0-ce.p.rapidapi.com';
   
-  console.log(`Found function name: ${fnName}`);
-  
-  // Convert code to JavaScript if needed
-  let jsCode = code;
-  if (language === 'python') {
-    jsCode = pythonToJs(code);
-    console.log(`Converted Python to JS:\n${jsCode}`);
-  } else if (language === 'java' || language === 'c') {
-    jsCode = javaCToJs(code);
-    console.log(`Converted ${language} to JS:\n${jsCode}`);
+  // Create submission
+  const createResponse = await fetch(`${judge0Url}/submissions?base64_encoded=true&wait=true`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-RapidAPI-Key': rapidApiKey,
+      'X-RapidAPI-Host': 'judge0-ce.p.rapidapi.com',
+    },
+    body: JSON.stringify({
+      source_code: btoa(sourceCode),
+      language_id: languageId,
+      expected_output: expectedOutput ? btoa(expectedOutput) : undefined,
+      cpu_time_limit: 5,
+      memory_limit: 128000,
+    }),
+  });
+
+  if (!createResponse.ok) {
+    const errorText = await createResponse.text();
+    console.error('Judge0 API error:', createResponse.status, errorText);
+    throw new Error(`Judge0 API error: ${createResponse.status} - ${errorText}`);
   }
+
+  const result = await createResponse.json();
   
-  // Run each test case
-  for (const tc of testCases) {
-    try {
-      // Build function call with arguments
-      const args = Object.values(tc.input).map(v => JSON.stringify(v)).join(', ');
-      
-      const evalCode = `
-        ${jsCode}
-        ${fnName}(${args})
-      `;
-      
-      console.log(`Executing: ${fnName}(${args})`);
-      
-      // Execute the code
-      const actual = new Function(`return (function() { ${evalCode} })()`)();
-      
-      console.log(`Result: ${JSON.stringify(actual)}, Expected: ${JSON.stringify(tc.expected)}`);
-      
-      // Compare results - handle different types
-      let isPassed = false;
-      
-      if (typeof actual === typeof tc.expected) {
-        if (typeof actual === 'number' && typeof tc.expected === 'number') {
-          // Handle floating point comparison
-          isPassed = Math.abs(actual - tc.expected) < 0.0001;
-        } else {
-          isPassed = JSON.stringify(actual) === JSON.stringify(tc.expected);
-        }
-      }
-      
-      if (isPassed) passed++;
-      results.push({ passed: isPassed, input: tc.input, expected: tc.expected, actual });
-      
-    } catch (e: unknown) {
-      console.error('Test case evaluation error:', e);
-      const errorMessage = e instanceof Error ? e.message : 'Unknown error';
-      results.push({ 
-        passed: false, 
-        input: tc.input, 
-        expected: tc.expected, 
-        actual: null, 
-        error: `Execution error: ${errorMessage}` 
-      });
+  return {
+    stdout: result.stdout ? atob(result.stdout) : null,
+    stderr: result.stderr ? atob(result.stderr) : null,
+    status: result.status,
+    time: result.time || '0',
+    memory: result.memory || 0,
+  };
+};
+
+// Compare outputs with tolerance for different formats
+const compareOutputs = (actual: string | null, expected: unknown): boolean => {
+  if (actual === null) return false;
+  
+  const trimmedActual = actual.trim();
+  
+  // Try to parse as JSON and compare
+  try {
+    const parsedActual = JSON.parse(trimmedActual);
+    const parsedExpected = typeof expected === 'string' ? JSON.parse(expected) : expected;
+    
+    // Handle floating point comparison
+    if (typeof parsedActual === 'number' && typeof parsedExpected === 'number') {
+      return Math.abs(parsedActual - parsedExpected) < 0.0001;
     }
+    
+    return JSON.stringify(parsedActual) === JSON.stringify(parsedExpected);
+  } catch {
+    // Direct string comparison
+    return trimmedActual === String(expected).trim();
   }
-  
-  console.log(`Evaluation complete: ${passed}/${testCases.length} passed`);
-  return { passed, total: testCases.length, results };
 };
 
 serve(async (req) => {
@@ -300,13 +186,97 @@ serve(async (req) => {
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
+
+    const languageId = LANGUAGE_IDS[language];
+    if (!languageId) {
+      return new Response(
+        JSON.stringify({ error: `Unsupported language: ${language}` }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Get function name
+    const fnName = functionName || extractFunctionName(code, language);
     
-    const result = evaluateCode(code, language, testCases, functionName);
+    if (!fnName) {
+      console.error('Could not find function name in code');
+      return new Response(
+        JSON.stringify({
+          passed: 0,
+          total: testCases.length,
+          results: testCases.map(tc => ({
+            passed: false,
+            input: tc.input,
+            expected: tc.expected,
+            actual: null,
+            error: 'Could not find function name in code. Make sure you define a function (e.g., function solution(...) or def solution(...)).'
+          }))
+        }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    console.log(`Found function name: ${fnName}`);
+
+    const results: { passed: boolean; input: unknown; expected: unknown; actual: unknown; error?: string; executionTime?: string }[] = [];
+    let passed = 0;
+
+    // Run each test case
+    for (const tc of testCases) {
+      try {
+        const wrappedCode = generateWrapperCode(code, language, fnName, tc.input);
+        console.log(`Executing test case with input: ${JSON.stringify(tc.input)}`);
+        
+        const execution = await executeWithJudge0(wrappedCode, languageId);
+        
+        console.log(`Execution result: status=${execution.status.description}, stdout=${execution.stdout}, stderr=${execution.stderr}`);
+        
+        // Check if execution was successful
+        if (execution.status.id !== 3) { // 3 = Accepted
+          results.push({
+            passed: false,
+            input: tc.input,
+            expected: tc.expected,
+            actual: null,
+            error: execution.stderr || execution.status.description,
+            executionTime: execution.time,
+          });
+          continue;
+        }
+        
+        // Compare output
+        const isPassed = compareOutputs(execution.stdout, tc.expected);
+        
+        if (isPassed) passed++;
+        
+        results.push({
+          passed: isPassed,
+          input: tc.input,
+          expected: tc.expected,
+          actual: execution.stdout?.trim() || null,
+          executionTime: execution.time,
+        });
+        
+      } catch (e: unknown) {
+        console.error('Test case execution error:', e);
+        const errorMessage = e instanceof Error ? e.message : 'Unknown error';
+        results.push({
+          passed: false,
+          input: tc.input,
+          expected: tc.expected,
+          actual: null,
+          error: `Execution error: ${errorMessage}`,
+        });
+      }
+    }
+
+    console.log(`Evaluation complete: ${passed}/${testCases.length} passed`);
     
     return new Response(
-      JSON.stringify(result),
+      JSON.stringify({ passed, total: testCases.length, results }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
+    
   } catch (error: unknown) {
     console.error('Evaluation error:', error);
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';

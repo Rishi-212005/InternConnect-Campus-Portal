@@ -116,7 +116,7 @@ const StudentExams: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isRunningTests, setIsRunningTests] = useState(false);
   const [showConfirmSubmit, setShowConfirmSubmit] = useState(false);
-  const [testResults, setTestResults] = useState<Record<string, { passed: number; total: number }>>({});
+  const [testResults, setTestResults] = useState<Record<string, { passed: number; total: number; results?: { passed: boolean; input: unknown; expected: unknown; actual: unknown; error?: string }[] }>>({});
 
   const fetchAssessments = async () => {
     if (!user) return;
@@ -287,7 +287,11 @@ const StudentExams: React.FC = () => {
       
       setTestResults(prev => ({
         ...prev,
-        [questionId]: { passed: result.passed, total: result.total }
+        [questionId]: { 
+          passed: result.passed, 
+          total: result.total,
+          results: result.results 
+        }
       }));
       
       toast({
@@ -297,46 +301,11 @@ const StudentExams: React.FC = () => {
       });
     } catch (error: any) {
       console.error('Test run error:', error);
-      
-      // Fallback to local evaluation for JavaScript
-      if (language === 'javascript') {
-        let passed = 0;
-        try {
-          const funcMatch = code.match(/function\s+(\w+)/);
-          if (funcMatch) {
-            const funcName = funcMatch[1];
-            testCases.forEach((tc: any) => {
-              try {
-                const evalCode = `
-                  ${code}
-                  ${funcName}(${Object.values(tc.input).map(v => JSON.stringify(v)).join(', ')})
-                `;
-                const result = new Function(`return ${evalCode}`)();
-                if (JSON.stringify(result) === JSON.stringify(tc.expected)) {
-                  passed++;
-                }
-              } catch (e) { /* Test failed */ }
-            });
-          }
-        } catch (e) { /* Evaluation failed */ }
-        
-        setTestResults(prev => ({
-          ...prev,
-          [questionId]: { passed, total: testCases.length }
-        }));
-        
-        toast({
-          title: 'Tests Run (Local)',
-          description: `${passed}/${testCases.length} test cases passed`,
-          variant: passed === testCases.length ? 'default' : 'destructive'
-        });
-      } else {
-        toast({ 
-          title: 'Error', 
-          description: 'Could not evaluate code. Please try again.', 
-          variant: 'destructive' 
-        });
-      }
+      toast({ 
+        title: 'Error', 
+        description: error.message || 'Could not evaluate code. Please try again.', 
+        variant: 'destructive' 
+      });
     } finally {
       setIsRunningTests(false);
     }
@@ -530,6 +499,36 @@ const StudentExams: React.FC = () => {
               </div>
             )}
 
+            {/* Test Cases Section */}
+            {Array.isArray(currentQuestion.test_cases) && currentQuestion.test_cases.length > 0 && (
+              <div className="mt-4">
+                <h3 className="font-semibold text-sm mb-2">Test Cases:</h3>
+                <div className="space-y-3">
+                  {(currentQuestion.test_cases as { input: Record<string, unknown>; expected: unknown }[]).slice(0, 3).map((tc, idx) => (
+                    <div key={idx} className="bg-muted/50 p-3 rounded-lg border text-sm font-mono">
+                      <div className="flex flex-col gap-1">
+                        <div>
+                          <span className="text-muted-foreground">Input: </span>
+                          <span className="text-foreground">
+                            {Object.entries(tc.input).map(([key, value]) => `${key} = ${JSON.stringify(value)}`).join(', ')}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">Expected Output: </span>
+                          <span className="text-green-600 dark:text-green-400 font-semibold">{JSON.stringify(tc.expected)}</span>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                  {(currentQuestion.test_cases as unknown[]).length > 3 && (
+                    <p className="text-xs text-muted-foreground">
+                      + {(currentQuestion.test_cases as unknown[]).length - 3} hidden test cases
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+
             {/* Question Navigation */}
             <div className="flex items-center justify-between mt-6 pt-4 border-t">
               <Button
@@ -610,12 +609,56 @@ const StudentExams: React.FC = () => {
                 </Button>
               </div>
             </div>
+            
+            {/* Code Editor */}
             <Textarea
               value={answers[currentQuestion.id] || ''}
               onChange={(e) => setAnswers(prev => ({ ...prev, [currentQuestion.id]: e.target.value }))}
-              className="flex-1 font-mono text-sm resize-none rounded-none border-0 focus-visible:ring-0"
+              className="flex-1 font-mono text-sm resize-none rounded-none border-0 focus-visible:ring-0 min-h-[300px]"
               placeholder="Write your code here..."
             />
+            
+            {/* Test Results Panel */}
+            {currentResult?.results && currentResult.results.length > 0 && (
+              <div className="border-t bg-muted/30 p-3 max-h-[200px] overflow-y-auto">
+                <h4 className="text-sm font-semibold mb-2">Test Results:</h4>
+                <div className="space-y-2">
+                  {currentResult.results.map((result, idx) => (
+                    <div 
+                      key={idx} 
+                      className={`p-2 rounded-md border text-xs font-mono ${
+                        result.passed 
+                          ? 'bg-green-50 dark:bg-green-950/30 border-green-200 dark:border-green-800' 
+                          : 'bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 mb-1">
+                        {result.passed ? (
+                          <CheckCircle className="w-3 h-3 text-green-600" />
+                        ) : (
+                          <XCircle className="w-3 h-3 text-red-600" />
+                        )}
+                        <span className={result.passed ? 'text-green-700 dark:text-green-400' : 'text-red-700 dark:text-red-400'}>
+                          Test Case {idx + 1}: {result.passed ? 'Passed' : 'Failed'}
+                        </span>
+                      </div>
+                      <div className="pl-5 space-y-0.5 text-muted-foreground">
+                        <div>Input: {JSON.stringify(result.input)}</div>
+                        <div>Expected: <span className="text-green-600">{JSON.stringify(result.expected)}</span></div>
+                        {!result.passed && (
+                          <>
+                            <div>Got: <span className="text-red-600">{result.actual !== null ? JSON.stringify(result.actual) : 'null'}</span></div>
+                            {result.error && (
+                              <div className="text-red-500">Error: {result.error}</div>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
