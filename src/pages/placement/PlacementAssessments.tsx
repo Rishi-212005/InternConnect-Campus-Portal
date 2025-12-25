@@ -27,13 +27,13 @@ import {
   Users,
   Clock,
   CheckCircle,
-  AlertCircle,
   Loader2,
-  Code,
   Trash2,
   Eye,
   Calendar,
   Target,
+  FileQuestion,
+  Save,
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useSupabaseAuthContext } from '@/contexts/SupabaseAuthContext';
@@ -52,76 +52,21 @@ interface Assessment {
   end_time: string | null;
   status: string;
   created_at: string;
+  total_marks: number;
   jobs?: { title: string; company_name: string };
 }
 
-interface CodingQuestion {
-  id: string;
-  title: string;
-  description: string;
-  difficulty: string;
-  points: number;
-  test_cases: unknown;
+interface QuizQuestion {
+  id?: string;
+  assessment_id?: string;
+  question_text: string;
+  option_a: string;
+  option_b: string;
+  option_c: string;
+  option_d: string;
+  correct_answer: string;
+  marks: number;
 }
-
-const sampleQuestions = [
-  {
-    title: 'Two Sum',
-    description: 'Given an array of integers nums and an integer target, return indices of the two numbers such that they add up to target.\n\nYou may assume that each input would have exactly one solution, and you may not use the same element twice.\n\nExample:\nInput: nums = [2,7,11,15], target = 9\nOutput: [0,1]\nExplanation: nums[0] + nums[1] == 9, so we return [0, 1].',
-    difficulty: 'easy',
-    constraints: 'Array length: 2 <= nums.length <= 10^4',
-    examples: 'Input: nums = [2,7,11,15], target = 9\nOutput: [0,1]',
-    starter_code: 'function twoSum(nums, target) {\n  // Your code here\n}',
-    test_cases: [
-      { input: { nums: [2, 7, 11, 15], target: 9 }, expected: [0, 1] },
-      { input: { nums: [3, 2, 4], target: 6 }, expected: [1, 2] },
-      { input: { nums: [3, 3], target: 6 }, expected: [0, 1] },
-    ],
-    points: 50,
-  },
-  {
-    title: 'Valid Parentheses',
-    description: 'Given a string s containing just the characters \'(\', \')\', \'{\', \'}\', \'[\' and \']\', determine if the input string is valid.\n\nAn input string is valid if:\n1. Open brackets must be closed by the same type of brackets.\n2. Open brackets must be closed in the correct order.\n3. Every close bracket has a corresponding open bracket of the same type.\n\nExample:\nInput: s = "()"\nOutput: true',
-    difficulty: 'easy',
-    constraints: '1 <= s.length <= 10^4',
-    examples: 'Input: s = "(){}[]"\nOutput: true',
-    starter_code: 'function isValid(s) {\n  // Your code here\n}',
-    test_cases: [
-      { input: { s: '()' }, expected: true },
-      { input: { s: '()[]{}' }, expected: true },
-      { input: { s: '(]' }, expected: false },
-    ],
-    points: 50,
-  },
-  {
-    title: 'Palindrome Number',
-    description: 'Given an integer x, return true if x is a palindrome, and false otherwise.\n\nExample:\nInput: x = 121\nOutput: true\nExplanation: 121 reads as 121 from left to right and from right to left.',
-    difficulty: 'easy',
-    constraints: '-2^31 <= x <= 2^31 - 1',
-    examples: 'Input: x = 121\nOutput: true',
-    starter_code: 'function isPalindrome(x) {\n  // Your code here\n}',
-    test_cases: [
-      { input: { x: 121 }, expected: true },
-      { input: { x: -121 }, expected: false },
-      { input: { x: 10 }, expected: false },
-    ],
-    points: 50,
-  },
-  {
-    title: 'Reverse Linked List',
-    description: 'Given the head of a singly linked list, reverse the list, and return the reversed list.\n\nExample:\nInput: head = [1,2,3,4,5]\nOutput: [5,4,3,2,1]',
-    difficulty: 'medium',
-    constraints: 'The number of nodes in the list is in the range [0, 5000]',
-    examples: 'Input: [1,2,3,4,5]\nOutput: [5,4,3,2,1]',
-    starter_code: 'function reverseList(head) {\n  // Your code here\n}',
-    test_cases: [
-      { input: { head: [1, 2, 3, 4, 5] }, expected: [5, 4, 3, 2, 1] },
-      { input: { head: [1, 2] }, expected: [2, 1] },
-      { input: { head: [] }, expected: [] },
-    ],
-    points: 75,
-  },
-];
 
 const PlacementAssessments: React.FC = () => {
   const { user } = useSupabaseAuthContext();
@@ -132,9 +77,11 @@ const PlacementAssessments: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [showQuestionsDialog, setShowQuestionsDialog] = useState(false);
+  const [showAddQuestionsDialog, setShowAddQuestionsDialog] = useState(false);
   const [selectedAssessment, setSelectedAssessment] = useState<Assessment | null>(null);
-  const [questions, setQuestions] = useState<CodingQuestion[]>([]);
+  const [questions, setQuestions] = useState<QuizQuestion[]>([]);
   const [eligibleStudents, setEligibleStudents] = useState<any[]>([]);
+  const [isSavingQuestions, setIsSavingQuestions] = useState(false);
   
   const [formData, setFormData] = useState({
     job_id: '',
@@ -145,6 +92,17 @@ const PlacementAssessments: React.FC = () => {
     start_time: '',
     end_time: '',
   });
+
+  // New question form
+  const [newQuestions, setNewQuestions] = useState<QuizQuestion[]>([{
+    question_text: '',
+    option_a: '',
+    option_b: '',
+    option_c: '',
+    option_d: '',
+    correct_answer: 'a',
+    marks: 1,
+  }]);
 
   const fetchAssessments = async () => {
     try {
@@ -171,11 +129,21 @@ const PlacementAssessments: React.FC = () => {
       .select(`
         id,
         student_id,
-        profiles!applications_student_id_fkey (full_name, email),
-        student_profiles!applications_student_id_fkey (department, cgpa)
+        profiles!inner (full_name, email),
+        student_profiles!inner (department, cgpa)
       `)
       .eq('job_id', jobId)
       .eq('status', 'faculty_approved');
+    
+    return data || [];
+  };
+
+  const fetchQuestions = async (assessmentId: string) => {
+    const { data } = await supabase
+      .from('quiz_questions')
+      .select('*')
+      .eq('assessment_id', assessmentId)
+      .order('created_at', { ascending: true });
     
     return data || [];
   };
@@ -203,28 +171,14 @@ const PlacementAssessments: React.FC = () => {
           end_time: formData.end_time || null,
           status: 'draft',
           created_by: user?.id,
+          total_marks: 0,
         })
         .select()
         .single();
 
       if (error) throw error;
 
-      // Add sample coding questions
-      const questionsToAdd = sampleQuestions.slice(0, 2).map(q => ({
-        assessment_id: assessment.id,
-        title: q.title,
-        description: q.description,
-        difficulty: q.difficulty,
-        constraints: q.constraints,
-        examples: q.examples,
-        starter_code: q.starter_code,
-        test_cases: q.test_cases,
-        points: q.points,
-      }));
-
-      await supabase.from('coding_questions').insert(questionsToAdd);
-
-      toast({ title: 'Success', description: 'Assessment created with 2 coding questions' });
+      toast({ title: 'Success', description: 'Assessment created! Now add MCQ questions (minimum 10).' });
       setShowCreateDialog(false);
       setFormData({
         job_id: '',
@@ -235,14 +189,121 @@ const PlacementAssessments: React.FC = () => {
         start_time: '',
         end_time: '',
       });
+      
+      // Open add questions dialog for the new assessment
+      setSelectedAssessment(assessment);
+      setShowAddQuestionsDialog(true);
       fetchAssessments();
     } catch (error: any) {
       toast({ title: 'Error', description: error.message, variant: 'destructive' });
     }
   };
 
+  const handleAddQuestion = () => {
+    setNewQuestions(prev => [...prev, {
+      question_text: '',
+      option_a: '',
+      option_b: '',
+      option_c: '',
+      option_d: '',
+      correct_answer: 'a',
+      marks: 1,
+    }]);
+  };
+
+  const handleRemoveQuestion = (index: number) => {
+    if (newQuestions.length > 1) {
+      setNewQuestions(prev => prev.filter((_, i) => i !== index));
+    }
+  };
+
+  const handleQuestionChange = (index: number, field: keyof QuizQuestion, value: string | number) => {
+    setNewQuestions(prev => prev.map((q, i) => 
+      i === index ? { ...q, [field]: value } : q
+    ));
+  };
+
+  const handleSaveQuestions = async () => {
+    if (!selectedAssessment) return;
+
+    // Validate all questions
+    const validQuestions = newQuestions.filter(q => 
+      q.question_text.trim() && 
+      q.option_a.trim() && 
+      q.option_b.trim() && 
+      q.option_c.trim() && 
+      q.option_d.trim()
+    );
+
+    if (validQuestions.length < 10) {
+      toast({ 
+        title: 'Minimum 10 Questions Required', 
+        description: `You have ${validQuestions.length} valid questions. Please add at least ${10 - validQuestions.length} more.`,
+        variant: 'destructive' 
+      });
+      return;
+    }
+
+    setIsSavingQuestions(true);
+
+    try {
+      const questionsToInsert = validQuestions.map(q => ({
+        assessment_id: selectedAssessment.id,
+        question_text: q.question_text,
+        option_a: q.option_a,
+        option_b: q.option_b,
+        option_c: q.option_c,
+        option_d: q.option_d,
+        correct_answer: q.correct_answer,
+        marks: q.marks,
+      }));
+
+      const { error } = await supabase
+        .from('quiz_questions')
+        .insert(questionsToInsert);
+
+      if (error) throw error;
+
+      // Update total marks in assessment
+      const totalMarks = validQuestions.reduce((sum, q) => sum + q.marks, 0);
+      await supabase
+        .from('assessments')
+        .update({ total_marks: totalMarks })
+        .eq('id', selectedAssessment.id);
+
+      toast({ title: 'Success', description: `${validQuestions.length} questions added successfully!` });
+      setShowAddQuestionsDialog(false);
+      setNewQuestions([{
+        question_text: '',
+        option_a: '',
+        option_b: '',
+        option_c: '',
+        option_d: '',
+        correct_answer: 'a',
+        marks: 1,
+      }]);
+      fetchAssessments();
+    } catch (error: any) {
+      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+    } finally {
+      setIsSavingQuestions(false);
+    }
+  };
+
   const handleActivateAssessment = async (assessmentId: string, jobId: string) => {
     try {
+      // Check if assessment has minimum 10 questions
+      const questions = await fetchQuestions(assessmentId);
+      
+      if (questions.length < 10) {
+        toast({ 
+          title: 'Cannot Activate', 
+          description: `Assessment needs at least 10 questions. Currently has ${questions.length}.`,
+          variant: 'destructive' 
+        });
+        return;
+      }
+
       await supabase
         .from('assessments')
         .update({ 
@@ -257,8 +318,8 @@ const PlacementAssessments: React.FC = () => {
       for (const student of students) {
         await supabase.from('notifications').insert({
           user_id: student.student_id,
-          title: 'Assessment Available',
-          message: 'A new coding assessment is now available for you. Complete it before the deadline.',
+          title: 'Quiz Assessment Available',
+          message: 'A new quiz assessment is now available for you. Complete it before the deadline.',
           link: '/student/exams',
         });
       }
@@ -276,12 +337,8 @@ const PlacementAssessments: React.FC = () => {
   const handleViewQuestions = async (assessment: Assessment) => {
     setSelectedAssessment(assessment);
     
-    const { data } = await supabase
-      .from('coding_questions')
-      .select('*')
-      .eq('assessment_id', assessment.id);
-    
-    setQuestions(data || []);
+    const questionsData = await fetchQuestions(assessment.id);
+    setQuestions(questionsData);
     
     const students = await fetchEligibleStudents(assessment.job_id);
     setEligibleStudents(students);
@@ -294,11 +351,11 @@ const PlacementAssessments: React.FC = () => {
       case 'draft':
         return <Badge variant="secondary">Draft</Badge>;
       case 'scheduled':
-        return <Badge className="bg-blue-100 text-blue-700">Scheduled</Badge>;
+        return <Badge className="bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300">Scheduled</Badge>;
       case 'active':
-        return <Badge className="bg-green-100 text-green-700">Active</Badge>;
+        return <Badge className="bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300">Active</Badge>;
       case 'completed':
-        return <Badge className="bg-gray-100 text-gray-700">Completed</Badge>;
+        return <Badge className="bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300">Completed</Badge>;
       default:
         return <Badge variant="secondary">{status}</Badge>;
     }
@@ -320,8 +377,8 @@ const PlacementAssessments: React.FC = () => {
         className="flex items-center justify-between"
       >
         <div>
-          <h1 className="text-3xl font-heading font-bold text-foreground">Online Assessments</h1>
-          <p className="text-muted-foreground mt-1">Create and manage coding assessments for candidates</p>
+          <h1 className="text-3xl font-heading font-bold text-foreground">Quiz Assessments</h1>
+          <p className="text-muted-foreground mt-1">Create and manage MCQ quiz assessments for candidates</p>
         </div>
         <Button onClick={() => setShowCreateDialog(true)} className="gap-2">
           <Plus className="w-4 h-4" />
@@ -387,7 +444,7 @@ const PlacementAssessments: React.FC = () => {
                 >
                   <div className="flex items-center gap-4">
                     <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center">
-                      <Code className="w-6 h-6 text-primary" />
+                      <FileQuestion className="w-6 h-6 text-primary" />
                     </div>
                     <div>
                       <h3 className="font-semibold">{assessment.title}</h3>
@@ -404,6 +461,10 @@ const PlacementAssessments: React.FC = () => {
                           Pass: {assessment.passing_score}%
                         </span>
                         <span className="flex items-center gap-1">
+                          <FileQuestion className="w-3 h-3" />
+                          {assessment.total_marks || 0} marks
+                        </span>
+                        <span className="flex items-center gap-1">
                           <Calendar className="w-3 h-3" />
                           {format(new Date(assessment.created_at), 'MMM dd, yyyy')}
                         </span>
@@ -417,14 +478,27 @@ const PlacementAssessments: React.FC = () => {
                       View
                     </Button>
                     {assessment.status === 'draft' && (
-                      <Button 
-                        variant="accent" 
-                        size="sm"
-                        onClick={() => handleActivateAssessment(assessment.id, assessment.job_id)}
-                      >
-                        <Play className="w-4 h-4 mr-1" />
-                        Activate
-                      </Button>
+                      <>
+                        <Button 
+                          variant="secondary" 
+                          size="sm"
+                          onClick={() => {
+                            setSelectedAssessment(assessment);
+                            setShowAddQuestionsDialog(true);
+                          }}
+                        >
+                          <Plus className="w-4 h-4 mr-1" />
+                          Add Questions
+                        </Button>
+                        <Button 
+                          variant="accent" 
+                          size="sm"
+                          onClick={() => handleActivateAssessment(assessment.id, assessment.job_id)}
+                        >
+                          <Play className="w-4 h-4 mr-1" />
+                          Activate
+                        </Button>
+                      </>
                     )}
                   </div>
                 </motion.div>
@@ -438,9 +512,9 @@ const PlacementAssessments: React.FC = () => {
       <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>Create New Assessment</DialogTitle>
+            <DialogTitle>Create New Quiz Assessment</DialogTitle>
             <DialogDescription>
-              Create a coding assessment for job applicants
+              Create a MCQ quiz assessment for job applicants
             </DialogDescription>
           </DialogHeader>
 
@@ -501,8 +575,7 @@ const PlacementAssessments: React.FC = () => {
 
             <div className="p-3 bg-primary/10 rounded-lg">
               <p className="text-sm">
-                <strong>Note:</strong> 2 coding questions will be automatically added (Two Sum & Valid Parentheses). 
-                You can customize questions after creation.
+                <strong>Note:</strong> After creating the assessment, you'll need to add at least 10 MCQ questions before activating.
               </p>
             </div>
           </div>
@@ -513,6 +586,145 @@ const PlacementAssessments: React.FC = () => {
             </Button>
             <Button onClick={handleCreateAssessment}>
               Create Assessment
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Questions Dialog */}
+      <Dialog open={showAddQuestionsDialog} onOpenChange={setShowAddQuestionsDialog}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Add MCQ Questions</DialogTitle>
+            <DialogDescription>
+              Add at least 10 questions to {selectedAssessment?.title}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-6">
+            {newQuestions.map((question, index) => (
+              <Card key={index} variant="outline" className="p-4">
+                <div className="flex items-center justify-between mb-4">
+                  <h4 className="font-semibold">Question {index + 1}</h4>
+                  <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2">
+                      <Label className="text-sm">Marks:</Label>
+                      <Input
+                        type="number"
+                        min="1"
+                        value={question.marks}
+                        onChange={(e) => handleQuestionChange(index, 'marks', parseInt(e.target.value) || 1)}
+                        className="w-20"
+                      />
+                    </div>
+                    {newQuestions.length > 1 && (
+                      <Button 
+                        variant="ghost" 
+                        size="icon"
+                        onClick={() => handleRemoveQuestion(index)}
+                      >
+                        <Trash2 className="w-4 h-4 text-destructive" />
+                      </Button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label>Question Text *</Label>
+                    <Textarea
+                      value={question.question_text}
+                      onChange={(e) => handleQuestionChange(index, 'question_text', e.target.value)}
+                      placeholder="Enter your question..."
+                      rows={2}
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label>Option A *</Label>
+                      <Input
+                        value={question.option_a}
+                        onChange={(e) => handleQuestionChange(index, 'option_a', e.target.value)}
+                        placeholder="Option A"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Option B *</Label>
+                      <Input
+                        value={question.option_b}
+                        onChange={(e) => handleQuestionChange(index, 'option_b', e.target.value)}
+                        placeholder="Option B"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Option C *</Label>
+                      <Input
+                        value={question.option_c}
+                        onChange={(e) => handleQuestionChange(index, 'option_c', e.target.value)}
+                        placeholder="Option C"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Option D *</Label>
+                      <Input
+                        value={question.option_d}
+                        onChange={(e) => handleQuestionChange(index, 'option_d', e.target.value)}
+                        placeholder="Option D"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Correct Answer *</Label>
+                    <Select 
+                      value={question.correct_answer} 
+                      onValueChange={(v) => handleQuestionChange(index, 'correct_answer', v as 'a' | 'b' | 'c' | 'd')}
+                    >
+                      <SelectTrigger className="w-40">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="a">Option A</SelectItem>
+                        <SelectItem value="b">Option B</SelectItem>
+                        <SelectItem value="c">Option C</SelectItem>
+                        <SelectItem value="d">Option D</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </Card>
+            ))}
+
+            <Button variant="outline" onClick={handleAddQuestion} className="w-full gap-2">
+              <Plus className="w-4 h-4" />
+              Add Another Question
+            </Button>
+
+            <div className="flex items-center justify-between p-3 bg-muted rounded-lg">
+              <p className="text-sm">
+                Total Questions: <strong>{newQuestions.length}</strong> | 
+                Total Marks: <strong>{newQuestions.reduce((sum, q) => sum + q.marks, 0)}</strong>
+              </p>
+              {newQuestions.length < 10 && (
+                <p className="text-sm text-destructive">
+                  Need {10 - newQuestions.length} more questions
+                </p>
+              )}
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-2 pt-4 border-t">
+            <Button variant="outline" onClick={() => setShowAddQuestionsDialog(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleSaveQuestions} disabled={isSavingQuestions} className="gap-2">
+              {isSavingQuestions ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Save className="w-4 h-4" />
+              )}
+              Save Questions
             </Button>
           </div>
         </DialogContent>
@@ -556,30 +768,39 @@ const PlacementAssessments: React.FC = () => {
             {/* Questions */}
             <div>
               <h3 className="font-semibold mb-3 flex items-center gap-2">
-                <Code className="w-4 h-4" />
-                Coding Questions ({questions.length})
+                <FileQuestion className="w-4 h-4" />
+                Quiz Questions ({questions.length})
               </h3>
-              <div className="space-y-3">
-                {questions.map((q, index) => (
-                  <div key={q.id} className="p-4 border border-border rounded-lg">
-                    <div className="flex items-center justify-between mb-2">
-                      <h4 className="font-medium">
-                        {index + 1}. {q.title}
-                      </h4>
-                      <div className="flex items-center gap-2">
-                        <Badge variant={q.difficulty === 'easy' ? 'secondary' : q.difficulty === 'medium' ? 'default' : 'destructive'}>
-                          {q.difficulty}
-                        </Badge>
-                        <Badge variant="outline">{q.points} pts</Badge>
+              {questions.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No questions added yet</p>
+              ) : (
+                <div className="space-y-3">
+                  {questions.map((q, index) => (
+                    <div key={q.id} className="p-4 border border-border rounded-lg">
+                      <div className="flex items-center justify-between mb-2">
+                        <h4 className="font-medium">
+                          {index + 1}. {q.question_text}
+                        </h4>
+                        <Badge variant="outline">{q.marks} marks</Badge>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 text-sm">
+                        <div className={`p-2 rounded ${q.correct_answer === 'a' ? 'bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300' : 'bg-muted'}`}>
+                          A: {q.option_a}
+                        </div>
+                        <div className={`p-2 rounded ${q.correct_answer === 'b' ? 'bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300' : 'bg-muted'}`}>
+                          B: {q.option_b}
+                        </div>
+                        <div className={`p-2 rounded ${q.correct_answer === 'c' ? 'bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300' : 'bg-muted'}`}>
+                          C: {q.option_c}
+                        </div>
+                        <div className={`p-2 rounded ${q.correct_answer === 'd' ? 'bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300' : 'bg-muted'}`}>
+                          D: {q.option_d}
+                        </div>
                       </div>
                     </div>
-                    <p className="text-sm text-muted-foreground line-clamp-2">{q.description}</p>
-                    <p className="text-xs text-muted-foreground mt-2">
-                      {Array.isArray(q.test_cases) ? q.test_cases.length : 0} test cases
-                    </p>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 
