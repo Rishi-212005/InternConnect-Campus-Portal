@@ -58,23 +58,55 @@ export const useApplications = (role: 'student' | 'recruiter' | 'faculty' | 'pla
       }
       
       // First fetch applications
-      let query = supabase
-        .from('applications')
-        .select(`
-          *,
-          jobs (id, title, company_name, location)
-        `)
-        .order('created_at', { ascending: false });
-
-      // Filter based on role
-      if (role === 'student' && userId) {
-        query = query.eq('student_id', userId);
-      } else if (role === 'faculty' && menteeIds.length > 0) {
-        // Faculty sees pending applications only from their mentees
-        query = query.eq('status', 'pending').in('student_id', menteeIds);
-      }
+      // For students, use the secure view that excludes confidential notes
+      // For other roles, use the full applications table
+      let appData: any[] = [];
+      let error: any = null;
       
-      const { data: appData, error } = await query;
+      if (role === 'student' && userId) {
+        // Students use the secure view without confidential notes
+        const result = await supabase
+          .from('student_applications_view' as any)
+          .select('*')
+          .eq('student_id', userId)
+          .order('created_at', { ascending: false });
+        
+        appData = result.data || [];
+        error = result.error;
+        
+        // Fetch job details separately for the view
+        if (appData.length > 0) {
+          const jobIds = [...new Set(appData.map(app => app.job_id))];
+          const { data: jobsData } = await supabase
+            .from('jobs')
+            .select('id, title, company_name, location')
+            .in('id', jobIds);
+          
+          const jobsMap = new Map(jobsData?.map(job => [job.id, job]) || []);
+          appData = appData.map(app => ({
+            ...app,
+            jobs: jobsMap.get(app.job_id) || null
+          }));
+        }
+      } else {
+        // Other roles use the full applications table
+        let query = supabase
+          .from('applications')
+          .select(`
+            *,
+            jobs (id, title, company_name, location)
+          `)
+          .order('created_at', { ascending: false });
+        
+        if (role === 'faculty' && menteeIds.length > 0) {
+          // Faculty sees pending applications only from their mentees
+          query = query.eq('status', 'pending').in('student_id', menteeIds);
+        }
+        
+        const result = await query;
+        appData = result.data || [];
+        error = result.error;
+      }
       
       if (error) throw error;
 
