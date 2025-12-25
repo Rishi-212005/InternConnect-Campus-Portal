@@ -35,13 +35,27 @@ const generateWrapperCode = (
 ): string => {
   const args = Object.values(testInput);
   const argsStr = args.map(v => JSON.stringify(v)).join(', ');
+  const inputJson = JSON.stringify(testInput);
 
   switch (language) {
     case 'javascript':
-      return `${code}\nconsole.log(JSON.stringify(${functionName}(${argsStr})));`;
+      // For JS, pass arguments using spread from input object values
+      return `${code}
+const __input = ${inputJson};
+const __args = Object.values(__input);
+console.log(JSON.stringify(${functionName}(...__args)));`;
     
     case 'python':
-      return `import json\n${code}\nprint(json.dumps(${functionName}(${argsStr})))`;
+      // For Python, use keyword arguments which is more flexible
+      return `import json
+${code}
+__input = json.loads('${inputJson.replace(/'/g, "\\'")}')
+# Try keyword args first, then positional
+try:
+    __result = ${functionName}(**__input)
+except TypeError:
+    __result = ${functionName}(*__input.values())
+print(json.dumps(__result))`;
     
     case 'java':
       return `import com.google.gson.Gson;
