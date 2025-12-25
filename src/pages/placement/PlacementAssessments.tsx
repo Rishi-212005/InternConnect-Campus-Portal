@@ -178,7 +178,7 @@ const PlacementAssessments: React.FC = () => {
 
       if (error) throw error;
 
-      toast({ title: 'Success', description: 'Assessment created! Now add MCQ questions (minimum 10).' });
+      toast({ title: 'Success', description: 'Assessment created! Now add MCQ questions.' });
       setShowCreateDialog(false);
       setFormData({
         job_id: '',
@@ -235,10 +235,10 @@ const PlacementAssessments: React.FC = () => {
       q.option_d.trim()
     );
 
-    if (validQuestions.length < 10) {
+    if (validQuestions.length === 0) {
       toast({ 
-        title: 'Minimum 10 Questions Required', 
-        description: `You have ${validQuestions.length} valid questions. Please add at least ${10 - validQuestions.length} more.`,
+        title: 'No Valid Questions', 
+        description: 'Please add at least one complete question.',
         variant: 'destructive' 
       });
       return;
@@ -292,13 +292,13 @@ const PlacementAssessments: React.FC = () => {
 
   const handleActivateAssessment = async (assessmentId: string, jobId: string) => {
     try {
-      // Check if assessment has minimum 10 questions
+      // Check if assessment has at least one question
       const questions = await fetchQuestions(assessmentId);
       
-      if (questions.length < 10) {
+      if (questions.length === 0) {
         toast({ 
           title: 'Cannot Activate', 
-          description: `Assessment needs at least 10 questions. Currently has ${questions.length}.`,
+          description: 'Assessment needs at least one question.',
           variant: 'destructive' 
         });
         return;
