@@ -8,20 +8,20 @@ const corsHeaders = {
 // Fixed admin users with predefined credentials
 const adminUsers = [
   {
-    email: 'placementadmin@gmail.com',
-    password: 'placementadmin@2025',
+    email: 'placementcell@gmail.com',
+    password: 'placementcell@2025',
     full_name: 'Placement Cell Admin',
     role: 'placement' as const,
   },
   {
-    email: 'systemadmin@gmail.com',
-    password: 'systemadmin@2025',
+    email: 'codecrewadmin@gmail.com',
+    password: 'codecrewadmin@2025',
     full_name: 'System Administrator',
     role: 'admin' as const,
   },
   {
-    email: 'recruiter@gmail.com',
-    password: 'recruiter@2025',
+    email: 'codecrewrecruiter@gmail.com',
+    password: 'codecrewrecruiter@2025',
     full_name: 'Default Recruiter',
     role: 'recruiter' as const,
   },
