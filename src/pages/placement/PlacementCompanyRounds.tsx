@@ -75,7 +75,7 @@ interface Round {
   };
 }
 
-type FilterType = 'all' | 'passed' | 'failed';
+type FilterType = 'all' | 'passed' | 'failed' | 'pending';
 
 const PlacementCompanyRounds: React.FC = () => {
   const { jobId } = useParams<{ jobId: string }>();
@@ -112,9 +112,10 @@ const PlacementCompanyRounds: React.FC = () => {
   
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // All passed students across all rounds (students who passed the latest round they attempted)
+  // All students categorized by their status
   const [allPassedStudents, setAllPassedStudents] = useState<StudentWithResults[]>([]);
   const [allFailedStudents, setAllFailedStudents] = useState<StudentWithResults[]>([]);
+  const [allPendingStudents, setAllPendingStudents] = useState<StudentWithResults[]>([]);
 
   useEffect(() => {
     if (jobId) {
@@ -202,14 +203,22 @@ const PlacementCompanyRounds: React.FC = () => {
             const attempt = attemptsMap.get(student.student_id);
             const studentWithAttempt = { ...student, exam_attempt: attempt };
 
-            if (!attempt || attempt.status === 'in_progress') {
+            if (!attempt) {
+              // No attempt at all - pending
               pending.push(studentWithAttempt);
-            } else if (attempt.status === 'completed') {
+            } else if (attempt.status === 'in_progress') {
+              // Exam started but not submitted - pending
+              pending.push(studentWithAttempt);
+            } else if (attempt.status === 'submitted' || attempt.status === 'completed') {
+              // Exam completed - check if passed or failed
               if ((attempt.percentage_score || 0) >= assessment.passing_score) {
                 passed.push(studentWithAttempt);
               } else {
                 failed.push(studentWithAttempt);
               }
+            } else if (attempt.status === 'failed') {
+              // Explicitly marked as failed
+              failed.push(studentWithAttempt);
             }
           });
 
@@ -222,31 +231,31 @@ const PlacementCompanyRounds: React.FC = () => {
 
       setRounds(roundsData);
 
-      // Calculate overall passed/failed students
-      // A student is "passed" if they passed the latest round they took
-      // A student is "failed" if they failed any round
+      // Calculate overall passed/failed/pending students
       const passedSet = new Map<string, StudentWithResults>();
       const failedSet = new Map<string, StudentWithResults>();
+      const pendingSet = new Map<string, StudentWithResults>();
 
       enrichedStudents.forEach((student: any) => {
         let roundsPassed = 0;
         let hasFailed = false;
+        let hasAttempted = false;
         let latestAttempt: any = null;
-        let lastRoundIndex = -1;
 
-        roundsData.forEach((round, index) => {
+        roundsData.forEach((round) => {
           const inPassed = round.students.passed.find(s => s.student_id === student.student_id);
           const inFailed = round.students.failed.find(s => s.student_id === student.student_id);
+          const inPending = round.students.pending.find(s => s.student_id === student.student_id);
           
           if (inPassed) {
             roundsPassed++;
+            hasAttempted = true;
             latestAttempt = inPassed.exam_attempt;
-            lastRoundIndex = index;
           }
           if (inFailed) {
             hasFailed = true;
+            hasAttempted = true;
             latestAttempt = inFailed.exam_attempt;
-            lastRoundIndex = index;
           }
         });
 
@@ -261,11 +270,15 @@ const PlacementCompanyRounds: React.FC = () => {
           failedSet.set(student.student_id, enrichedStudent);
         } else if (roundsPassed > 0) {
           passedSet.set(student.student_id, enrichedStudent);
+        } else {
+          // Student hasn't attempted or is still in progress
+          pendingSet.set(student.student_id, enrichedStudent);
         }
       });
 
       setAllPassedStudents(Array.from(passedSet.values()));
       setAllFailedStudents(Array.from(failedSet.values()));
+      setAllPendingStudents(Array.from(pendingSet.values()));
 
       // Calculate eligible students (those who passed all rounds or haven't been assessed yet)
       const studentsWithoutAssessment = enrichedStudents.filter((student: any) => {
@@ -415,7 +428,8 @@ const PlacementCompanyRounds: React.FC = () => {
   const getFilteredStudents = () => {
     if (filter === 'passed') return allPassedStudents;
     if (filter === 'failed') return allFailedStudents;
-    return [...allPassedStudents, ...allFailedStudents];
+    if (filter === 'pending') return allPendingStudents;
+    return [...allPassedStudents, ...allFailedStudents, ...allPendingStudents];
   };
 
   if (isLoading) {
@@ -462,13 +476,14 @@ const PlacementCompanyRounds: React.FC = () => {
               <SelectItem value="all">All Students</SelectItem>
               <SelectItem value="passed">Passed</SelectItem>
               <SelectItem value="failed">Failed</SelectItem>
+              <SelectItem value="pending">Pending</SelectItem>
             </SelectContent>
           </Select>
         </div>
       </motion.div>
 
       {/* Stats Overview */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
         <Card variant="glass">
           <CardContent className="pt-4 text-center">
             <ClipboardList className="w-6 h-6 text-primary mx-auto mb-2" />
@@ -481,6 +496,13 @@ const PlacementCompanyRounds: React.FC = () => {
             <Users className="w-6 h-6 text-accent mx-auto mb-2" />
             <p className="text-2xl font-bold">{eligibleStudents.length}</p>
             <p className="text-sm text-muted-foreground">Eligible Students</p>
+          </CardContent>
+        </Card>
+        <Card variant="glass">
+          <CardContent className="pt-4 text-center">
+            <Clock className="w-6 h-6 text-warning mx-auto mb-2" />
+            <p className="text-2xl font-bold">{allPendingStudents.length}</p>
+            <p className="text-sm text-muted-foreground">Pending</p>
           </CardContent>
         </Card>
         <Card variant="glass">
@@ -637,7 +659,69 @@ const PlacementCompanyRounds: React.FC = () => {
             </Card>
           )}
 
-          {/* Recruitment Pipeline */}
+          {/* Pending Students Section */}
+          {(filter === 'all' || filter === 'pending') && (
+            <Card variant="elevated">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-warning">
+                  <Clock className="w-5 h-5" />
+                  Pending Students ({allPendingStudents.length})
+                </CardTitle>
+                <CardDescription>Students who are eligible but haven't attempted the exam yet</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {allPendingStudents.length === 0 ? (
+                  <p className="text-center text-muted-foreground py-8">All eligible students have attempted the exam</p>
+                ) : (
+                  <div className="space-y-3">
+                    {allPendingStudents.map((student) => (
+                      <div key={student.student_id} className="p-4 rounded-lg border border-warning/20 bg-warning/5">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-4">
+                            <Avatar className="w-10 h-10">
+                              <AvatarImage src={student.profile?.avatar_url || undefined} />
+                              <AvatarFallback>{student.profile?.full_name?.charAt(0) || 'S'}</AvatarFallback>
+                            </Avatar>
+                            <div>
+                              <p className="font-medium">{student.profile?.full_name || 'Unknown'}</p>
+                              <p className="text-sm text-muted-foreground">
+                                {student.student_profile?.roll_number} • {student.student_profile?.department}
+                              </p>
+                            </div>
+                            <Badge variant="secondary" className="bg-warning/10 text-warning">
+                              Awaiting Attempt
+                            </Badge>
+                          </div>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={async () => {
+                              // Send reminder notification
+                              try {
+                                await supabase.from('notifications').insert({
+                                  user_id: student.student_id,
+                                  title: 'Assessment Reminder',
+                                  message: `You have a pending assessment for ${jobInfo?.company_name}. Please complete it soon.`,
+                                  link: '/student/exams',
+                                });
+                                toast({ title: 'Reminder Sent', description: 'Notification sent to student' });
+                              } catch (error: any) {
+                                toast({ title: 'Error', description: error.message, variant: 'destructive' });
+                              }
+                            }}
+                          >
+                            <Send className="w-4 h-4 mr-1" />
+                            Send Reminder
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
           <Card variant="elevated">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
