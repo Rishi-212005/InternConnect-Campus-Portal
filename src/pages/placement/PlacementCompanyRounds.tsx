@@ -131,9 +131,30 @@ const PlacementCompanyRounds: React.FC = () => {
         const { data: attempts } = await supabase
           .from('exam_attempts')
           .select('id, student_id, status, percentage_score, submitted_at, total_score')
-          .eq('assessment_id', currentAssessment.id);
+          .eq('assessment_id', currentAssessment.id)
+          .order('submitted_at', { ascending: false, nullsFirst: false });
         
-        attemptsMap = new Map(attempts?.map(a => [a.student_id, a]) || []);
+        // For each student, keep only the best attempt (submitted/completed over in_progress)
+        attempts?.forEach(a => {
+          const existing = attemptsMap.get(a.student_id);
+          if (!existing) {
+            attemptsMap.set(a.student_id, a);
+          } else {
+            // Prefer submitted/completed over in_progress
+            const completedStatuses = ['submitted', 'completed', 'failed'];
+            const existingIsComplete = completedStatuses.includes(existing.status);
+            const newIsComplete = completedStatuses.includes(a.status);
+            
+            if (!existingIsComplete && newIsComplete) {
+              attemptsMap.set(a.student_id, a);
+            } else if (existingIsComplete && newIsComplete) {
+              // Both complete, prefer higher score
+              if ((a.percentage_score || 0) > (existing.percentage_score || 0)) {
+                attemptsMap.set(a.student_id, a);
+              }
+            }
+          }
+        });
       }
 
       // Enrich with profile data and categorize
