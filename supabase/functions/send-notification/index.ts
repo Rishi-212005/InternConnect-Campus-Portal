@@ -1,7 +1,9 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { SMTPClient } from "https://deno.land/x/denomailer@1.6.0/mod.ts";
 
-const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
+const GMAIL_EMAIL = Deno.env.get("GMAIL_EMAIL");
+const GMAIL_APP_PASSWORD = Deno.env.get("GMAIL_APP_PASSWORD");
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -285,47 +287,43 @@ const getEmailContent = (type: string, recipientName: string, data: any) => {
             <div style="background: linear-gradient(135deg, #eff6ff, #dbeafe); padding: 20px; border-radius: 12px; margin: 24px 0; border-left: 4px solid #3b82f6;">
               <p style="margin: 5px 0; color: #1e40af;"><strong>📅 Date:</strong> ${data.interviewDate}</p>
               <p style="margin: 5px 0; color: #1e40af;"><strong>⏰ Time:</strong> ${data.interviewTime}</p>
-              ${data.meetingLink ? `<p style="margin: 5px 0; color: #1e40af;"><strong>🔗 Meeting:</strong> <a href="${data.meetingLink}" style="color: #3b82f6;">${data.meetingLink}</a></p>` : ''}
+              ${data.meetingLink ? `<p style="margin: 5px 0; color: #1e40af;"><strong>🔗 Meeting Link:</strong> <a href="${data.meetingLink}" style="color: #3b82f6;">${data.meetingLink}</a></p>` : ''}
             </div>
-            <p style="font-size: 14px; color: #64748b;">Please join on time. Good luck!</p>
             <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 24px 0;">
             <p style="font-size: 14px; color: #64748b; margin-bottom: 0;">
-              Best regards,<br><strong style="color: #334155;">InternConnect Placement Team</strong>
+              Best of luck!<br><strong style="color: #334155;">InternConnect Placement Team</strong>
             </p>
           </div>
         </div>
       `,
     },
-    // Selection/Rejection emails
+    // Candidate selection/rejection emails
     candidate_selected: {
       subject: `🎊 Congratulations! You've Been Selected - ${data.companyName}`,
       html: `
         <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background: #f8fafc;">
-          <div style="background: linear-gradient(135deg, #22c55e, #10b981); padding: 40px; border-radius: 16px 16px 0 0; text-align: center;">
-            <h1 style="color: white; margin: 0; font-size: 32px;">🎊 Congratulations!</h1>
-            <p style="color: rgba(255,255,255,0.95); margin: 15px 0 0 0; font-size: 18px;">You've Been Selected!</p>
+          <div style="background: linear-gradient(135deg, #22c55e, #10b981); padding: 30px; border-radius: 16px 16px 0 0; text-align: center;">
+            <h1 style="color: white; margin: 0; font-size: 28px;">🎊 Congratulations!</h1>
+            <p style="color: rgba(255,255,255,0.9); margin: 10px 0 0 0; font-size: 16px;">You've Been Selected!</p>
           </div>
           <div style="background: white; padding: 30px; border-radius: 0 0 16px 16px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);">
             <p style="font-size: 18px; color: #334155;">Dear <strong>${recipientName}</strong>,</p>
             <p style="font-size: 16px; color: #475569; line-height: 1.6;">
-              We are absolutely delighted to inform you that you have been <strong style="color: #22c55e;">SELECTED</strong> for the position of <strong>${data.jobTitle}</strong> at <strong>${data.companyName}</strong>!
+              We are absolutely thrilled to inform you that you have been <strong style="color: #22c55e;">SELECTED</strong> for the position of <strong>${data.jobTitle}</strong> at <strong>${data.companyName}</strong>!
             </p>
             <div style="background: linear-gradient(135deg, #f0fdf4, #dcfce7); padding: 24px; border-radius: 12px; margin: 24px 0; text-align: center; border: 2px solid #22c55e;">
               <p style="margin: 0; color: #166534; font-size: 20px; font-weight: bold;">
-                🏆 Welcome to ${data.companyName}!
+                🏆 Welcome to ${data.companyName}! 🏆
               </p>
             </div>
             <p style="font-size: 16px; color: #475569; line-height: 1.6;">
-              The recruiter will contact you soon with further details about the onboarding process, joining date, and other formalities.
+              Your hard work and dedication have paid off. The company will reach out to you soon with further details regarding onboarding and next steps.
             </p>
-            <div style="background: linear-gradient(135deg, #eff6ff, #dbeafe); padding: 20px; border-radius: 12px; margin: 24px 0; border-left: 4px solid #3b82f6;">
-              <p style="margin: 0; color: #1e40af; font-size: 14px;">
-                <strong>📝 What's Next?</strong><br>
-                • Keep checking your email for onboarding details<br>
-                • Complete any pending documentation<br>
-                • Prepare for your new journey!
-              </p>
+            ${data.notes ? `
+            <div style="background: #f1f5f9; padding: 16px; border-radius: 8px; margin: 20px 0;">
+              <p style="margin: 0; color: #475569; font-size: 14px;"><strong>📝 Additional Notes:</strong> ${data.notes}</p>
             </div>
+            ` : ''}
             <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 24px 0;">
             <p style="font-size: 14px; color: #64748b; margin-bottom: 0;">
               Congratulations once again!<br><strong style="color: #334155;">InternConnect Placement Team</strong>
@@ -335,51 +333,55 @@ const getEmailContent = (type: string, recipientName: string, data: any) => {
       `,
     },
     candidate_rejected: {
-      subject: `Interview Update - ${data.companyName}`,
+      subject: `Application Update - ${data.companyName}`,
       html: `
         <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background: #f8fafc;">
           <div style="background: linear-gradient(135deg, #6366f1, #8b5cf6); padding: 30px; border-radius: 16px 16px 0 0; text-align: center;">
-            <h1 style="color: white; margin: 0; font-size: 28px;">Interview Update</h1>
+            <h1 style="color: white; margin: 0; font-size: 28px;">Application Update</h1>
           </div>
           <div style="background: white; padding: 30px; border-radius: 0 0 16px 16px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);">
             <p style="font-size: 18px; color: #334155;">Dear <strong>${recipientName}</strong>,</p>
             <p style="font-size: 16px; color: #475569; line-height: 1.6;">
-              Thank you for your interest in the <strong>${data.jobTitle}</strong> position at <strong>${data.companyName}</strong> and for taking the time to interview with us.
+              Thank you for your interest in the position of <strong>${data.jobTitle}</strong> at <strong>${data.companyName}</strong> and for taking the time to go through our selection process.
             </p>
             <p style="font-size: 16px; color: #475569; line-height: 1.6;">
               After careful consideration, we regret to inform you that we have decided to move forward with other candidates whose qualifications more closely match our current requirements.
             </p>
-            <div style="background: linear-gradient(135deg, #eff6ff, #dbeafe); padding: 20px; border-radius: 12px; margin: 24px 0; border-left: 4px solid #3b82f6;">
-              <p style="margin: 0; color: #1e40af; font-size: 16px;">
-                💪 <strong>Keep Going!</strong> This is just one opportunity among many. Continue building your skills and applying to other positions. Your perfect opportunity is out there!
+            <div style="background: linear-gradient(135deg, #fef3c7, #fde68a); padding: 20px; border-radius: 12px; margin: 24px 0; border-left: 4px solid #f59e0b;">
+              <p style="margin: 0; color: #92400e; font-size: 16px;">
+                💪 <strong>Keep going!</strong> This is not the end of your journey. Continue exploring other opportunities on our platform and keep improving your skills.
               </p>
             </div>
-            <p style="font-size: 14px; color: #64748b; line-height: 1.6;">
-              We encourage you to explore other opportunities on our platform and apply for positions that match your profile.
-            </p>
+            ${data.notes ? `
+            <div style="background: #f1f5f9; padding: 16px; border-radius: 8px; margin: 20px 0;">
+              <p style="margin: 0; color: #475569; font-size: 14px;"><strong>📝 Feedback:</strong> ${data.notes}</p>
+            </div>
+            ` : ''}
             <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 24px 0;">
             <p style="font-size: 14px; color: #64748b; margin-bottom: 0;">
-              We wish you the best in your career journey!<br><strong style="color: #334155;">InternConnect Placement Team</strong>
+              Best regards,<br><strong style="color: #334155;">InternConnect Placement Team</strong>
             </p>
           </div>
         </div>
       `,
     },
-    // Application status update
+    // Application status updates
     application_status: {
-      subject: `Application Update - ${data.jobTitle}`,
+      subject: `📋 Application Status Update - ${data.jobTitle}`,
       html: `
         <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background: #f8fafc;">
           <div style="background: linear-gradient(135deg, #6366f1, #8b5cf6); padding: 30px; border-radius: 16px 16px 0 0; text-align: center;">
-            <h1 style="color: white; margin: 0; font-size: 28px;">Application Status Update</h1>
+            <h1 style="color: white; margin: 0; font-size: 28px;">📋 Application Update</h1>
           </div>
           <div style="background: white; padding: 30px; border-radius: 0 0 16px 16px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);">
             <p style="font-size: 18px; color: #334155;">Dear <strong>${recipientName}</strong>,</p>
             <p style="font-size: 16px; color: #475569; line-height: 1.6;">
               Your application for <strong>${data.jobTitle}</strong> at <strong>${data.companyName}</strong> has been updated.
             </p>
-            <div style="background: #f1f5f9; padding: 20px; border-radius: 12px; margin: 24px 0; border-left: 4px solid ${data.status === 'selected' ? '#22c55e' : data.status === 'rejected' ? '#ef4444' : '#6366f1'};">
-              <p style="margin: 0; font-size: 18px;"><strong>Status:</strong> <span style="color: ${data.status === 'selected' ? '#22c55e' : data.status === 'rejected' ? '#ef4444' : '#6366f1'}; text-transform: uppercase; font-weight: bold;">${data.status?.replace(/_/g, ' ')}</span></p>
+            <div style="background: linear-gradient(135deg, #eff6ff, #dbeafe); padding: 20px; border-radius: 12px; margin: 24px 0; border-left: 4px solid #3b82f6;">
+              <p style="margin: 0; color: #1e40af; font-size: 18px;">
+                <strong>Status:</strong> ${data.status || 'Updated'}
+              </p>
             </div>
             ${data.message ? `<p style="font-size: 14px; color: #64748b;">${data.message}</p>` : ''}
             <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 24px 0;">
@@ -395,8 +397,8 @@ const getEmailContent = (type: string, recipientName: string, data: any) => {
       subject: `✅ Application Approved by Faculty - ${data.jobTitle}`,
       html: `
         <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background: #f8fafc;">
-          <div style="background: linear-gradient(135deg, #6366f1, #8b5cf6); padding: 30px; border-radius: 16px 16px 0 0; text-align: center;">
-            <h1 style="color: white; margin: 0; font-size: 28px;">📋 Application Approved</h1>
+          <div style="background: linear-gradient(135deg, #22c55e, #16a34a); padding: 30px; border-radius: 16px 16px 0 0; text-align: center;">
+            <h1 style="color: white; margin: 0; font-size: 28px;">✅ Application Approved</h1>
           </div>
           <div style="background: white; padding: 30px; border-radius: 0 0 16px 16px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);">
             <p style="font-size: 18px; color: #334155;">Dear <strong>${recipientName}</strong>,</p>
@@ -486,25 +488,43 @@ const handler = async (req: Request): Promise<Response> => {
     console.log(`Sending ${type} notification to ${recipientEmail}`);
     console.log('Data:', JSON.stringify(data));
 
+    // Validate Gmail credentials
+    if (!GMAIL_EMAIL || !GMAIL_APP_PASSWORD) {
+      console.error("Gmail credentials not configured");
+      throw new Error("Gmail credentials not configured. Please set GMAIL_EMAIL and GMAIL_APP_PASSWORD secrets.");
+    }
+
     const emailContent = getEmailContent(type, recipientName, data);
 
-    const emailResponse = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${RESEND_API_KEY}`,
+    // Send email using Gmail SMTP
+    const client = new SMTPClient({
+      connection: {
+        hostname: "smtp.gmail.com",
+        port: 465,
+        tls: true,
+        auth: {
+          username: GMAIL_EMAIL,
+          password: GMAIL_APP_PASSWORD,
+        },
       },
-      body: JSON.stringify({
-        from: "InternConnect <onboarding@resend.dev>",
-        to: [recipientEmail],
-        subject: emailContent.subject,
-        html: emailContent.html,
-      }),
     });
 
-    const emailResult = await emailResponse.json();
-
-    console.log("Email response:", JSON.stringify(emailResult));
+    try {
+      await client.send({
+        from: `InternConnect <${GMAIL_EMAIL}>`,
+        to: recipientEmail,
+        subject: emailContent.subject,
+        content: "auto",
+        html: emailContent.html,
+      });
+      
+      console.log("Email sent successfully via Gmail SMTP");
+      await client.close();
+    } catch (smtpError: any) {
+      console.error("SMTP Error:", smtpError);
+      await client.close();
+      throw new Error(`Failed to send email: ${smtpError.message}`);
+    }
 
     // Also create in-app notification
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
@@ -528,7 +548,7 @@ const handler = async (req: Request): Promise<Response> => {
       console.log('In-app notification created');
     }
 
-    return new Response(JSON.stringify({ success: true, emailResult }), {
+    return new Response(JSON.stringify({ success: true, message: "Email sent successfully" }), {
       status: 200,
       headers: { "Content-Type": "application/json", ...corsHeaders },
     });
