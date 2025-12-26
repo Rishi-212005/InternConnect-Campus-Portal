@@ -7,7 +7,6 @@ import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import {
@@ -55,6 +54,8 @@ interface StudentWithResults {
   } | null;
   roundsPassed: number;
   currentRoundStatus: 'pending' | 'passed' | 'failed';
+  passedRounds: string[]; // Round titles where student passed
+  failedRound?: string; // Round title where student failed
 }
 
 interface Assessment {
@@ -88,24 +89,17 @@ const PlacementCompanyRounds: React.FC = () => {
   const [rounds, setRounds] = useState<Round[]>([]);
   const [eligibleStudents, setEligibleStudents] = useState<StudentWithResults[]>([]);
   const [filter, setFilter] = useState<FilterType>('all');
+  const [roundFilter, setRoundFilter] = useState<string>('all'); // Round filter for passed/failed
   
   // Dialogs
   const [showResultModal, setShowResultModal] = useState(false);
   const [selectedStudent, setSelectedStudent] = useState<StudentWithResults | null>(null);
   const [showAssignRoundDialog, setShowAssignRoundDialog] = useState(false);
-  const [showScheduleInterviewDialog, setShowScheduleInterviewDialog] = useState(false);
   const [showFailedMessageDialog, setShowFailedMessageDialog] = useState(false);
   
   // Available assessments for next round
   const [availableAssessments, setAvailableAssessments] = useState<Assessment[]>([]);
   const [selectedAssessmentId, setSelectedAssessmentId] = useState<string>('');
-  
-  // Interview scheduling
-  const [interviewDate, setInterviewDate] = useState('');
-  const [interviewTime, setInterviewTime] = useState('');
-  const [interviewDuration, setInterviewDuration] = useState('60');
-  const [meetingLink, setMeetingLink] = useState('');
-  const [interviewNotes, setInterviewNotes] = useState('');
   
   // Failed message
   const [failedMessage, setFailedMessage] = useState('Unfortunately, you did not meet the minimum requirements for this round. Please try again next time.');
@@ -181,6 +175,8 @@ const PlacementCompanyRounds: React.FC = () => {
             student_profile: studentProfile,
             roundsPassed: 0,
             currentRoundStatus: 'pending' as const,
+            passedRounds: [] as string[],
+            failedRound: undefined,
           };
         })
       );
@@ -241,21 +237,24 @@ const PlacementCompanyRounds: React.FC = () => {
         let hasFailed = false;
         let hasAttempted = false;
         let latestAttempt: any = null;
+        const passedRoundsList: string[] = [];
+        let failedRoundName: string | undefined;
 
         roundsData.forEach((round) => {
           const inPassed = round.students.passed.find(s => s.student_id === student.student_id);
           const inFailed = round.students.failed.find(s => s.student_id === student.student_id);
-          const inPending = round.students.pending.find(s => s.student_id === student.student_id);
           
           if (inPassed) {
             roundsPassed++;
             hasAttempted = true;
             latestAttempt = inPassed.exam_attempt;
+            passedRoundsList.push(round.assessment.title);
           }
           if (inFailed) {
             hasFailed = true;
             hasAttempted = true;
             latestAttempt = inFailed.exam_attempt;
+            failedRoundName = round.assessment.title;
           }
         });
 
@@ -264,6 +263,8 @@ const PlacementCompanyRounds: React.FC = () => {
           roundsPassed,
           exam_attempt: latestAttempt,
           currentRoundStatus: hasFailed ? 'failed' : (roundsPassed > 0 ? 'passed' : 'pending'),
+          passedRounds: passedRoundsList,
+          failedRound: failedRoundName,
         };
 
         if (hasFailed) {
@@ -308,43 +309,25 @@ const PlacementCompanyRounds: React.FC = () => {
     setShowAssignRoundDialog(true);
   };
 
-  const handleOpenScheduleInterview = (student: StudentWithResults) => {
-    setSelectedStudent(student);
-    setInterviewDate('');
-    setInterviewTime('');
-    setInterviewDuration('60');
-    setMeetingLink('');
-    setInterviewNotes('');
-    setShowScheduleInterviewDialog(true);
-  };
-
-  const handleOpenFailedMessage = (student: StudentWithResults) => {
-    setSelectedStudent(student);
-    setFailedMessage('Unfortunately, you did not meet the minimum requirements for this round. Please try again next time.');
-    setShowFailedMessageDialog(true);
-  };
-
-  const handleAssignNextRound = async () => {
-    if (!selectedStudent || !selectedAssessmentId) return;
-
+  // Add single student to interview list
+  const handleAddToInterviewList = async (student: StudentWithResults) => {
     setIsSubmitting(true);
     try {
-      // Update application status to shortlisted
+      // Update application status to interview
       await supabase
         .from('applications')
-        .update({ status: 'shortlisted' })
-        .eq('id', selectedStudent.application_id);
+        .update({ status: 'interview' })
+        .eq('id', student.application_id);
 
       // Send notification
       await supabase.from('notifications').insert({
-        user_id: selectedStudent.student_id,
-        title: 'Next Round Assigned',
-        message: `You have been assigned to the next assessment round for ${jobInfo?.company_name}. Please check your exams section.`,
-        link: '/student/exams',
+        user_id: student.student_id,
+        title: 'Added to Interview List',
+        message: `You have been added to the interview list for ${jobInfo?.company_name}. The placement cell will schedule your interview soon.`,
+        link: '/student/schedule',
       });
 
-      toast({ title: 'Success', description: 'Student assigned to next round' });
-      setShowAssignRoundDialog(false);
+      toast({ title: 'Success', description: 'Student added to interview list' });
       fetchJobData();
     } catch (error: any) {
       toast({ title: 'Error', description: error.message, variant: 'destructive' });
@@ -353,40 +336,33 @@ const PlacementCompanyRounds: React.FC = () => {
     }
   };
 
-  const handleScheduleInterview = async () => {
-    if (!selectedStudent || !interviewDate || !interviewTime) return;
+  // Add all passed students to interview list
+  const handleAddAllToInterviewList = async () => {
+    const filteredStudents = getFilteredPassedStudents();
+    if (filteredStudents.length === 0) {
+      toast({ title: 'No students', description: 'No passed students to add', variant: 'destructive' });
+      return;
+    }
 
     setIsSubmitting(true);
     try {
-      const scheduledAt = new Date(`${interviewDate}T${interviewTime}`);
+      // Update all applications
+      for (const student of filteredStudents) {
+        await supabase
+          .from('applications')
+          .update({ status: 'interview' })
+          .eq('id', student.application_id);
 
-      // Create interview schedule
-      await supabase.from('interview_schedules').insert({
-        application_id: selectedStudent.application_id,
-        scheduled_at: scheduledAt.toISOString(),
-        duration_minutes: parseInt(interviewDuration),
-        meeting_link: meetingLink || null,
-        notes: interviewNotes || null,
-        scheduled_by: user?.id,
-        interview_status: 'scheduled',
-      });
+        // Send notification
+        await supabase.from('notifications').insert({
+          user_id: student.student_id,
+          title: 'Added to Interview List',
+          message: `You have been added to the interview list for ${jobInfo?.company_name}. The placement cell will schedule your interview soon.`,
+          link: '/student/schedule',
+        });
+      }
 
-      // Update application status to interview
-      await supabase
-        .from('applications')
-        .update({ status: 'interview' })
-        .eq('id', selectedStudent.application_id);
-
-      // Send notification
-      await supabase.from('notifications').insert({
-        user_id: selectedStudent.student_id,
-        title: 'Interview Scheduled',
-        message: `Your interview for ${jobInfo?.company_name} has been scheduled for ${format(scheduledAt, 'PPp')}.`,
-        link: '/student/schedule',
-      });
-
-      toast({ title: 'Success', description: 'Interview scheduled successfully' });
-      setShowScheduleInterviewDialog(false);
+      toast({ title: 'Success', description: `${filteredStudents.length} student(s) added to interview list` });
       fetchJobData();
     } catch (error: any) {
       toast({ title: 'Error', description: error.message, variant: 'destructive' });
@@ -430,6 +406,53 @@ const PlacementCompanyRounds: React.FC = () => {
     if (filter === 'failed') return allFailedStudents;
     if (filter === 'pending') return allPendingStudents;
     return [...allPassedStudents, ...allFailedStudents, ...allPendingStudents];
+  };
+
+  // Filter passed students by round
+  const getFilteredPassedStudents = () => {
+    if (roundFilter === 'all') return allPassedStudents;
+    return allPassedStudents.filter(s => s.passedRounds.includes(roundFilter));
+  };
+
+  // Filter failed students by round
+  const getFilteredFailedStudents = () => {
+    if (roundFilter === 'all') return allFailedStudents;
+    return allFailedStudents.filter(s => s.failedRound === roundFilter);
+  };
+
+  // Handle opening failed message dialog
+  const handleOpenFailedMessage = (student: StudentWithResults) => {
+    setSelectedStudent(student);
+    setFailedMessage('Unfortunately, you did not meet the minimum requirements for this round. Please try again next time.');
+    setShowFailedMessageDialog(true);
+  };
+
+  // Handle assign next round
+  const handleAssignNextRound = async () => {
+    if (!selectedStudent || !selectedAssessmentId) return;
+
+    setIsSubmitting(true);
+    try {
+      await supabase
+        .from('applications')
+        .update({ status: 'shortlisted' })
+        .eq('id', selectedStudent.application_id);
+
+      await supabase.from('notifications').insert({
+        user_id: selectedStudent.student_id,
+        title: 'Next Round Assigned',
+        message: `You have been assigned to the next assessment round for ${jobInfo?.company_name}. Please check your exams section.`,
+        link: '/student/exams',
+      });
+
+      toast({ title: 'Success', description: 'Student assigned to next round' });
+      setShowAssignRoundDialog(false);
+      fetchJobData();
+    } catch (error: any) {
+      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   if (isLoading) {
@@ -541,18 +564,45 @@ const PlacementCompanyRounds: React.FC = () => {
           {(filter === 'all' || filter === 'passed') && (
             <Card variant="elevated">
               <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-success">
-                  <CheckCircle className="w-5 h-5" />
-                  Passed Students ({allPassedStudents.length})
-                </CardTitle>
-                <CardDescription>Students who passed their assessments</CardDescription>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle className="flex items-center gap-2 text-success">
+                      <CheckCircle className="w-5 h-5" />
+                      Passed Students ({getFilteredPassedStudents().length})
+                    </CardTitle>
+                    <CardDescription>Students who passed their assessments</CardDescription>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Select value={roundFilter} onValueChange={setRoundFilter}>
+                      <SelectTrigger className="w-[180px]">
+                        <SelectValue placeholder="Filter by round" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Rounds</SelectItem>
+                        {rounds.map((round, index) => (
+                          <SelectItem key={round.assessment.id} value={round.assessment.title}>
+                            Round {index + 1}: {round.assessment.title}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Button
+                      size="sm"
+                      onClick={handleAddAllToInterviewList}
+                      disabled={isSubmitting || getFilteredPassedStudents().length === 0}
+                    >
+                      {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <ListPlus className="w-4 h-4 mr-1" />}
+                      Add All to Interview List
+                    </Button>
+                  </div>
+                </div>
               </CardHeader>
               <CardContent>
-                {allPassedStudents.length === 0 ? (
-                  <p className="text-center text-muted-foreground py-8">No students have passed yet</p>
+                {getFilteredPassedStudents().length === 0 ? (
+                  <p className="text-center text-muted-foreground py-8">No students have passed {roundFilter !== 'all' ? `${roundFilter}` : 'yet'}</p>
                 ) : (
                   <div className="space-y-3">
-                    {allPassedStudents.map((student) => (
+                    {getFilteredPassedStudents().map((student) => (
                       <div key={student.student_id} className="p-4 rounded-lg border border-success/20 bg-success/5">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-4">
@@ -563,8 +613,10 @@ const PlacementCompanyRounds: React.FC = () => {
                             <div>
                               <p className="font-medium">{student.profile?.full_name || 'Unknown'}</p>
                               <p className="text-sm text-muted-foreground">
-                                {student.student_profile?.roll_number} • {student.student_profile?.department} • 
-                                <span className="text-success ml-1">{student.roundsPassed} round(s) passed</span>
+                                {student.student_profile?.roll_number} • {student.student_profile?.department}
+                              </p>
+                              <p className="text-xs text-success">
+                                Passed: {student.passedRounds.join(', ')}
                               </p>
                             </div>
                             {student.exam_attempt?.percentage_score !== null && (
@@ -592,10 +644,11 @@ const PlacementCompanyRounds: React.FC = () => {
                             </Button>
                             <Button
                               size="sm"
-                              onClick={() => handleOpenScheduleInterview(student)}
+                              onClick={() => handleAddToInterviewList(student)}
+                              disabled={isSubmitting}
                             >
-                              <Calendar className="w-4 h-4 mr-1" />
-                              Schedule Interview
+                              <ListPlus className="w-4 h-4 mr-1" />
+                              Add to Interview List
                             </Button>
                           </div>
                         </div>
@@ -611,18 +664,35 @@ const PlacementCompanyRounds: React.FC = () => {
           {(filter === 'all' || filter === 'failed') && (
             <Card variant="elevated">
               <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-destructive">
-                  <XCircle className="w-5 h-5" />
-                  Failed Students ({allFailedStudents.length})
-                </CardTitle>
-                <CardDescription>Students who did not meet the minimum requirements</CardDescription>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle className="flex items-center gap-2 text-destructive">
+                      <XCircle className="w-5 h-5" />
+                      Failed Students ({getFilteredFailedStudents().length})
+                    </CardTitle>
+                    <CardDescription>Students who did not meet the minimum requirements</CardDescription>
+                  </div>
+                  <Select value={roundFilter} onValueChange={setRoundFilter}>
+                    <SelectTrigger className="w-[180px]">
+                      <SelectValue placeholder="Filter by round" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Rounds</SelectItem>
+                      {rounds.map((round, index) => (
+                        <SelectItem key={round.assessment.id} value={round.assessment.title}>
+                          Round {index + 1}: {round.assessment.title}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </CardHeader>
               <CardContent>
-                {allFailedStudents.length === 0 ? (
-                  <p className="text-center text-muted-foreground py-8">No students have failed</p>
+                {getFilteredFailedStudents().length === 0 ? (
+                  <p className="text-center text-muted-foreground py-8">No students have failed {roundFilter !== 'all' ? `${roundFilter}` : ''}</p>
                 ) : (
                   <div className="space-y-3">
-                    {allFailedStudents.map((student) => (
+                    {getFilteredFailedStudents().map((student) => (
                       <div key={student.student_id} className="p-4 rounded-lg border border-destructive/20 bg-destructive/5">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-4">
@@ -634,6 +704,9 @@ const PlacementCompanyRounds: React.FC = () => {
                               <p className="font-medium">{student.profile?.full_name || 'Unknown'}</p>
                               <p className="text-sm text-muted-foreground">
                                 {student.student_profile?.roll_number} • {student.student_profile?.department}
+                              </p>
+                              <p className="text-xs text-destructive">
+                                Failed at: {student.failedRound || 'Unknown round'}
                               </p>
                             </div>
                             {student.exam_attempt?.percentage_score !== null && (
@@ -838,75 +911,6 @@ const PlacementCompanyRounds: React.FC = () => {
             <Button onClick={handleAssignNextRound} disabled={!selectedAssessmentId || isSubmitting}>
               {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
               Assign
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Schedule Interview Dialog */}
-      <Dialog open={showScheduleInterviewDialog} onOpenChange={setShowScheduleInterviewDialog}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Schedule Interview</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <p className="text-sm text-muted-foreground">
-              Schedule an interview for <strong>{selectedStudent?.profile?.full_name}</strong>.
-            </p>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Date</Label>
-                <Input
-                  type="date"
-                  value={interviewDate}
-                  onChange={(e) => setInterviewDate(e.target.value)}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Time</Label>
-                <Input
-                  type="time"
-                  value={interviewTime}
-                  onChange={(e) => setInterviewTime(e.target.value)}
-                />
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label>Duration (minutes)</Label>
-              <Select value={interviewDuration} onValueChange={setInterviewDuration}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="30">30 minutes</SelectItem>
-                  <SelectItem value="45">45 minutes</SelectItem>
-                  <SelectItem value="60">60 minutes</SelectItem>
-                  <SelectItem value="90">90 minutes</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label>Meeting Link (optional)</Label>
-              <Input
-                placeholder="https://meet.google.com/..."
-                value={meetingLink}
-                onChange={(e) => setMeetingLink(e.target.value)}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Notes (optional)</Label>
-              <Textarea
-                placeholder="Any additional notes..."
-                value={interviewNotes}
-                onChange={(e) => setInterviewNotes(e.target.value)}
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowScheduleInterviewDialog(false)}>Cancel</Button>
-            <Button onClick={handleScheduleInterview} disabled={!interviewDate || !interviewTime || isSubmitting}>
-              {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
-              Schedule
             </Button>
           </DialogFooter>
         </DialogContent>
