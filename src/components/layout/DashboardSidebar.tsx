@@ -22,6 +22,7 @@ import {
   Code,
   UserCheck,
   LogOut,
+  Trophy,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -60,6 +61,7 @@ const roleNavItems: Record<AppRole, NavItem[]> = {
     { icon: Users, label: 'Candidates', path: '/placement/candidates' },
     { icon: Code, label: 'Assessments', path: '/placement/assessments' },
     { icon: Calendar, label: 'Interviews', path: '/placement/interviews' },
+    { icon: Trophy, label: 'Placed Candidates', path: '/placement/placed' },
     { icon: Building2, label: 'Companies', path: '/placement/companies' },
     { icon: ClipboardList, label: 'Reports', path: '/placement/reports' },
   ],

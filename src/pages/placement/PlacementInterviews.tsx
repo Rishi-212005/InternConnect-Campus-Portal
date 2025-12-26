@@ -183,8 +183,18 @@ const PlacementInterviews: React.FC = () => {
         }
       });
 
-      // Add interviews with details
+      // Add interviews with details (filter out completed interviews older than 24 hours)
+      const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      
       for (const interview of interviewsData || []) {
+        // Skip completed interviews older than 24 hours - they go to "Placed Candidates" section
+        if (interview.interview_status === 'completed') {
+          const completedAt = new Date(interview.scheduled_at);
+          if (completedAt < twentyFourHoursAgo) {
+            continue;
+          }
+        }
+        
         const app = apps?.find(a => a.id === interview.application_id);
         if (!app) continue;
 
