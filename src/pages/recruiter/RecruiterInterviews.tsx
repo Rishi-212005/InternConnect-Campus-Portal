@@ -14,7 +14,9 @@ import {
   Loader2,
   Mail,
   Briefcase,
-  Link as LinkIcon
+  Link as LinkIcon,
+  Check,
+  X
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useSupabaseAuthContext } from '@/contexts/SupabaseAuthContext';
@@ -30,8 +32,10 @@ interface Interview {
   duration_minutes: number | null;
   meeting_link: string | null;
   notes: string | null;
+  interview_status: string | null;
   application: {
     id: string;
+    student_id: string;
     student_name: string;
     student_email: string;
     job_title: string;
@@ -48,8 +52,8 @@ interface ShortlistedCandidate {
 
 const statusConfig: Record<string, { label: string; color: string }> = {
   scheduled: { label: 'Scheduled', color: 'bg-blue-100 text-blue-700' },
-  completed: { label: 'Completed', color: 'bg-green-100 text-green-700' },
-  cancelled: { label: 'Cancelled', color: 'bg-red-100 text-red-700' },
+  completed: { label: 'Selected', color: 'bg-green-100 text-green-700' },
+  cancelled: { label: 'Rejected', color: 'bg-red-100 text-red-700' },
 };
 
 const RecruiterInterviews: React.FC = () => {
@@ -135,6 +139,7 @@ const RecruiterInterviews: React.FC = () => {
             ...interview,
             application: app ? {
               id: app.id,
+              student_id: app.student_id,
               student_name: studentInfo?.full_name || 'Unknown',
               student_email: studentInfo?.email || '',
               job_title: (app.jobs as any)?.title || 'Unknown Position',
@@ -248,14 +253,61 @@ const RecruiterInterviews: React.FC = () => {
     }
   };
 
-  const todayInterviews = interviews.filter(i => isToday(parseISO(i.scheduled_at)));
-  const upcomingInterviews = interviews.filter(i => isFuture(parseISO(i.scheduled_at)));
-  const completedInterviews = interviews.filter(i => !isFuture(parseISO(i.scheduled_at)) && !isToday(parseISO(i.scheduled_at)));
+  const handleInterviewDecision = async (interview: Interview, decision: 'selected' | 'rejected') => {
+    if (!interview.application) return;
 
-  const getInterviewStatus = (scheduledAt: string) => {
-    const date = parseISO(scheduledAt);
-    if (isFuture(date) || isToday(date)) return 'scheduled';
-    return 'completed';
+    try {
+      // Update interview status
+      const interviewStatus = decision === 'selected' ? 'completed' : 'cancelled';
+      await supabase
+        .from('interview_schedules')
+        .update({ interview_status: interviewStatus })
+        .eq('id', interview.id);
+
+      // Update application status
+      await supabase
+        .from('applications')
+        .update({ status: decision })
+        .eq('id', interview.application.id);
+
+      // Send notification to student
+      await supabase
+        .from('notifications')
+        .insert({
+          user_id: interview.application.student_id,
+          title: decision === 'selected' ? 'Congratulations! You are Selected' : 'Interview Update',
+          message: decision === 'selected' 
+            ? `You have been selected for the position of ${interview.application.job_title}! The recruiter will contact you soon.`
+            : `Unfortunately, you were not selected for the position of ${interview.application.job_title}. Keep trying!`,
+          link: '/student/applications'
+        });
+
+      toast({ 
+        title: 'Success', 
+        description: decision === 'selected' 
+          ? 'Candidate marked as selected!' 
+          : 'Candidate marked as rejected'
+      });
+      
+      fetchInterviews();
+    } catch (error: any) {
+      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+    }
+  };
+
+  const todayInterviews = interviews.filter(i => 
+    isToday(parseISO(i.scheduled_at)) && i.interview_status === 'scheduled'
+  );
+  const upcomingInterviews = interviews.filter(i => 
+    (isFuture(parseISO(i.scheduled_at)) || isToday(parseISO(i.scheduled_at))) && 
+    i.interview_status === 'scheduled'
+  );
+  const completedInterviews = interviews.filter(i => 
+    i.interview_status === 'completed' || i.interview_status === 'cancelled'
+  );
+
+  const getInterviewStatus = (interview: Interview) => {
+    return interview.interview_status || 'scheduled';
   };
 
   return (
@@ -400,8 +452,9 @@ const RecruiterInterviews: React.FC = () => {
                 ) : (
                   <div className="space-y-3">
                     {interviews.map((interview, index) => {
-                      const status = getInterviewStatus(interview.scheduled_at);
-                      const statusStyle = statusConfig[status];
+                      const status = getInterviewStatus(interview);
+                      const statusStyle = statusConfig[status] || statusConfig.scheduled;
+                      const isScheduled = status === 'scheduled';
                       
                       return (
                         <motion.div
@@ -443,6 +496,28 @@ const RecruiterInterviews: React.FC = () => {
                                   <LinkIcon className="w-4 h-4" />
                                 </a>
                               </Button>
+                            )}
+                            {isScheduled && (
+                              <>
+                                <Button 
+                                  variant="outline" 
+                                  size="sm" 
+                                  className="text-green-600 hover:bg-green-50 hover:text-green-700"
+                                  onClick={() => handleInterviewDecision(interview, 'selected')}
+                                  title="Accept candidate"
+                                >
+                                  <Check className="w-4 h-4" />
+                                </Button>
+                                <Button 
+                                  variant="outline" 
+                                  size="sm" 
+                                  className="text-red-500 hover:bg-red-50 hover:text-red-600"
+                                  onClick={() => handleInterviewDecision(interview, 'rejected')}
+                                  title="Reject candidate"
+                                >
+                                  <X className="w-4 h-4" />
+                                </Button>
+                              </>
                             )}
                           </div>
                         </motion.div>
