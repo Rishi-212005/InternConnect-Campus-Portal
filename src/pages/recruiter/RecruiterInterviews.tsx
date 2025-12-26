@@ -257,18 +257,35 @@ const RecruiterInterviews: React.FC = () => {
     if (!interview.application) return;
 
     try {
+      // Immediately update local state for dynamic UI
+      setInterviews(prev => prev.map(i => 
+        i.id === interview.id 
+          ? { ...i, interview_status: decision === 'selected' ? 'completed' : 'cancelled' }
+          : i
+      ));
+
       // Update interview status
       const interviewStatus = decision === 'selected' ? 'completed' : 'cancelled';
-      await supabase
+      const { error: interviewError } = await supabase
         .from('interview_schedules')
         .update({ interview_status: interviewStatus })
         .eq('id', interview.id);
 
+      if (interviewError) {
+        console.error('Interview update error:', interviewError);
+        throw interviewError;
+      }
+
       // Update application status
-      await supabase
+      const { error: appError } = await supabase
         .from('applications')
         .update({ status: decision })
         .eq('id', interview.application.id);
+
+      if (appError) {
+        console.error('Application update error:', appError);
+        throw appError;
+      }
 
       // Send notification to student
       await supabase
@@ -289,8 +306,11 @@ const RecruiterInterviews: React.FC = () => {
           : 'Candidate marked as rejected'
       });
       
+      // Refresh to ensure sync with database
       fetchInterviews();
     } catch (error: any) {
+      // Revert local state on error
+      fetchInterviews();
       toast({ title: 'Error', description: error.message, variant: 'destructive' });
     }
   };
