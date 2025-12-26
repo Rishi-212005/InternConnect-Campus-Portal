@@ -257,12 +257,8 @@ const RecruiterInterviews: React.FC = () => {
     if (!interview.application) return;
 
     try {
-      // Immediately update local state for dynamic UI
-      setInterviews(prev => prev.map(i => 
-        i.id === interview.id 
-          ? { ...i, interview_status: decision === 'selected' ? 'completed' : 'cancelled' }
-          : i
-      ));
+      // Immediately remove from pending list for dynamic UI
+      setInterviews(prev => prev.filter(i => i.id !== interview.id));
 
       // Update interview status
       const interviewStatus = decision === 'selected' ? 'completed' : 'cancelled';
