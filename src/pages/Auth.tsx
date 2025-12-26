@@ -27,12 +27,13 @@ import type { Database } from '@/integrations/supabase/types';
 
 type AppRole = Database['public']['Enums']['app_role'];
 
-// Roles that can signup (student and faculty only)
-const signupAllowedRoles: AppRole[] = ['student', 'faculty'];
+// Roles that can signup (student, faculty, and recruiter)
+const signupAllowedRoles: AppRole[] = ['student', 'faculty', 'recruiter'];
 
 const roleOptions: { role: AppRole; label: string; icon: React.ComponentType<any>; color: string; signupAllowed: boolean }[] = [
   { role: 'student', label: 'Student', icon: GraduationCap, color: 'bg-accent', signupAllowed: true },
   { role: 'faculty', label: 'Faculty/Mentor', icon: BookOpen, color: 'bg-warning', signupAllowed: true },
+  { role: 'recruiter', label: 'Recruiter', icon: Building2, color: 'bg-primary', signupAllowed: true },
 ];
 
 // Admin role info (credentials are NOT exposed in UI - users must know them)
@@ -79,6 +80,7 @@ const Auth: React.FC = () => {
   const [signupDepartment, setSignupDepartment] = useState('');
   const [signupRollNumber, setSignupRollNumber] = useState('');
   const [signupFacultyId, setSignupFacultyId] = useState('');
+  const [signupCompanyName, setSignupCompanyName] = useState('');
 
   useEffect(() => {
     if (isAuthenticated && role) {
@@ -179,7 +181,7 @@ const Auth: React.FC = () => {
     }
 
     setIsLoading(true);
-    const { error } = await signUp(signupEmail, signupPassword, signupName, selectedRole, signupDepartment, signupRollNumber, signupFacultyId);
+    const { error } = await signUp(signupEmail, signupPassword, signupName, selectedRole, signupDepartment, signupRollNumber, signupFacultyId, signupCompanyName);
     setIsLoading(false);
 
     if (error) {
@@ -398,7 +400,7 @@ const Auth: React.FC = () => {
                   <Alert className="mb-4">
                     <AlertCircle className="h-4 w-4" />
                     <AlertDescription>
-                      Only Students and Faculty/Mentors can sign up. Admin, Placement Cell, and Recruiters use preset credentials.
+                      Students, Faculty/Mentors, and Recruiters can sign up. Admin and Placement Cell use preset credentials.
                     </AlertDescription>
                   </Alert>
 
@@ -464,10 +466,10 @@ const Auth: React.FC = () => {
                       </div>
                     </div>
 
-                    {/* Role Selection - Only Student and Faculty */}
+                    {/* Role Selection - Student, Faculty, Recruiter */}
                     <div className="space-y-2">
                       <Label>Select Your Role</Label>
-                      <div className="grid grid-cols-2 gap-2">
+                      <div className="grid grid-cols-3 gap-2">
                         {roleOptions.map((option) => {
                           const Icon = option.icon;
                           return (
@@ -475,7 +477,7 @@ const Auth: React.FC = () => {
                               key={option.role}
                               type="button"
                               onClick={() => setSelectedRole(option.role)}
-                              className={`p-3 rounded-lg border-2 transition-all flex items-center gap-2 ${
+                              className={`p-3 rounded-lg border-2 transition-all flex flex-col items-center gap-2 ${
                                 selectedRole === option.role
                                   ? 'border-primary bg-primary/10'
                                   : 'border-border hover:border-primary/50'
@@ -484,7 +486,7 @@ const Auth: React.FC = () => {
                               <div className={`h-8 w-8 rounded-md ${option.color} flex items-center justify-center`}>
                                 <Icon className="h-4 w-4 text-primary-foreground" />
                               </div>
-                              <span className="text-sm font-medium">{option.label}</span>
+                              <span className="text-xs font-medium">{option.label}</span>
                             </button>
                           );
                         })}
@@ -496,22 +498,43 @@ const Auth: React.FC = () => {
                       )}
                     </div>
 
-                    {/* Department Field */}
-                    <div className="space-y-2">
-                      <Label htmlFor="signup-department">Department</Label>
-                      <div className="relative">
-                        <Building2 className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                        <Input
-                          id="signup-department"
-                          type="text"
-                          placeholder="shortcuts ex..CSE,EC...."
-                          className="pl-10"
-                          value={signupDepartment}
-                          onChange={(e) => setSignupDepartment(e.target.value)}
-                          required
-                        />
+                    {/* Department Field - Only for Students and Faculty */}
+                    {(selectedRole === 'student' || selectedRole === 'faculty') && (
+                      <div className="space-y-2">
+                        <Label htmlFor="signup-department">Department</Label>
+                        <div className="relative">
+                          <Building2 className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                          <Input
+                            id="signup-department"
+                            type="text"
+                            placeholder="shortcuts ex..CSE,EC...."
+                            className="pl-10"
+                            value={signupDepartment}
+                            onChange={(e) => setSignupDepartment(e.target.value)}
+                            required
+                          />
+                        </div>
                       </div>
-                    </div>
+                    )}
+
+                    {/* Company Name Field - Only for Recruiters */}
+                    {selectedRole === 'recruiter' && (
+                      <div className="space-y-2">
+                        <Label htmlFor="signup-company">Company Name</Label>
+                        <div className="relative">
+                          <Building2 className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                          <Input
+                            id="signup-company"
+                            type="text"
+                            placeholder="e.g., Google, Microsoft..."
+                            className="pl-10"
+                            value={signupCompanyName}
+                            onChange={(e) => setSignupCompanyName(e.target.value)}
+                            required
+                          />
+                        </div>
+                      </div>
+                    )}
 
                     {/* Roll Number Field - Only for Students */}
                     {selectedRole === 'student' && (
