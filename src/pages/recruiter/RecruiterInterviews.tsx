@@ -277,9 +277,10 @@ const RecruiterInterviews: React.FC = () => {
       }
 
       // Update application status
+      const newStatus = decision === 'selected' ? 'selected' : 'rejected';
       const { error: appError } = await supabase
         .from('applications')
-        .update({ status: decision })
+        .update({ status: newStatus })
         .eq('id', interview.application.id);
 
       if (appError) {
@@ -298,6 +299,47 @@ const RecruiterInterviews: React.FC = () => {
             : `Unfortunately, you were not selected for the position of ${interview.application.job_title}. Keep trying!`,
           link: '/student/applications'
         });
+
+      // Get student's mentor
+      const { data: mentorRequest } = await supabase
+        .from('mentor_requests')
+        .select('mentor_id')
+        .eq('student_id', interview.application.student_id)
+        .eq('status', 'approved')
+        .maybeSingle();
+
+      // Notify mentor
+      if (mentorRequest?.mentor_id) {
+        await supabase
+          .from('notifications')
+          .insert({
+            user_id: mentorRequest.mentor_id,
+            title: decision === 'selected' ? 'Mentee Selected!' : 'Mentee Interview Update',
+            message: decision === 'selected' 
+              ? `Your mentee has been selected for the position of ${interview.application.job_title}!`
+              : `Your mentee was not selected for the position of ${interview.application.job_title}.`,
+            link: '/faculty/students'
+          });
+      }
+
+      // Notify all placement admins
+      const { data: placementAdmins } = await supabase
+        .from('user_roles')
+        .select('user_id')
+        .eq('role', 'placement');
+
+      if (placementAdmins && placementAdmins.length > 0) {
+        const placementNotifications = placementAdmins.map(admin => ({
+          user_id: admin.user_id,
+          title: decision === 'selected' ? 'Candidate Selected' : 'Candidate Rejected',
+          message: decision === 'selected' 
+            ? `A candidate has been selected for ${interview.application?.job_title}.`
+            : `A candidate was rejected for ${interview.application?.job_title}.`,
+          link: decision === 'selected' ? '/placement/placed' : '/placement/interviews'
+        }));
+        
+        await supabase.from('notifications').insert(placementNotifications);
+      }
 
       toast({ 
         title: 'Success', 
