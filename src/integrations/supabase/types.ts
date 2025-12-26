@@ -797,6 +797,13 @@ export type Database = {
       }
     }
     Functions: {
+      get_mentor_student_counts: {
+        Args: { mentor_ids: string[] }
+        Returns: {
+          mentor_id: string
+          student_count: number
+        }[]
+      }
       get_user_role: {
         Args: { _user_id: string }
         Returns: Database["public"]["Enums"]["app_role"]
