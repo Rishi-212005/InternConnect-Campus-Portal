@@ -63,95 +63,59 @@ export const useMentor = (userId?: string, userRole?: string) => {
   // Fetch available mentors for student's department
   const fetchAvailableMentors = async (department: string) => {
     try {
-      // Get approved faculty in the same department with their profile info
-      // Join faculty_profiles with profiles to get complete mentor details
-      const { data: facultyData, error: facultyError } = await supabase
+      // Step 1: Get approved faculty in the same department
+      const { data: facultyProfiles, error: facultyError } = await supabase
         .from('faculty_profiles')
-        .select(`
-          user_id, 
-          department, 
-          designation, 
-          employee_id, 
-          is_approved,
-          profiles!faculty_profiles_user_id_fkey (
-            full_name,
-            email,
-            avatar_url
-          )
-        `)
+        .select('user_id, department, designation, employee_id, is_approved')
         .eq('department', department)
         .eq('is_approved', true);
 
       if (facultyError) {
         console.error('Faculty fetch error:', facultyError);
-        // Fallback: try fetching separately
-        const { data: facultyProfiles, error: fpError } = await supabase
-          .from('faculty_profiles')
-          .select('user_id, department, designation, employee_id, is_approved')
-          .eq('department', department)
-          .eq('is_approved', true);
-
-        if (fpError || !facultyProfiles || facultyProfiles.length === 0) {
-          setAvailableMentors([]);
-          return;
-        }
-
-        // Get profile info for faculty - use RPC or direct query
-        const userIds = facultyProfiles.map(f => f.user_id);
-        
-        // Get student count for each mentor
-        const { data: mentorCounts } = await supabase
-          .from('mentor_requests')
-          .select('mentor_id')
-          .eq('status', 'approved')
-          .in('mentor_id', userIds);
-
-        const countMap: Record<string, number> = {};
-        mentorCounts?.forEach(m => {
-          countMap[m.mentor_id] = (countMap[m.mentor_id] || 0) + 1;
-        });
-
-        // Since profiles RLS blocks students, use faculty_profiles data
-        const mentorsWithDetails: FacultyWithProfile[] = facultyProfiles.map(faculty => {
-          return {
-            user_id: faculty.user_id,
-            full_name: 'Faculty Member',
-            email: '',
-            department: faculty.department,
-            designation: faculty.designation,
-            employee_id: faculty.employee_id,
-            is_approved: faculty.is_approved,
-            student_count: countMap[faculty.user_id] || 0,
-          };
-        });
-
-        setAvailableMentors(mentorsWithDetails);
-        return;
-      }
-
-      if (!facultyData || facultyData.length === 0) {
         setAvailableMentors([]);
         return;
       }
 
-      // Get student count for each mentor
-      const userIds = facultyData.map(f => f.user_id);
-      const { data: mentorCounts } = await supabase
+      if (!facultyProfiles || facultyProfiles.length === 0) {
+        setAvailableMentors([]);
+        return;
+      }
+
+      const userIds = facultyProfiles.map(f => f.user_id);
+
+      // Step 2: Fetch profiles for these faculty members (RLS now allows this)
+      const { data: profiles, error: profilesError } = await supabase
+        .from('profiles')
+        .select('user_id, full_name, email, avatar_url')
+        .in('user_id', userIds);
+
+      if (profilesError) {
+        console.error('Profiles fetch error:', profilesError);
+      }
+
+      // Step 3: Get student count for each mentor from approved mentor_requests
+      const { data: mentorCounts, error: countError } = await supabase
         .from('mentor_requests')
         .select('mentor_id')
         .eq('status', 'approved')
         .in('mentor_id', userIds);
 
+      if (countError) {
+        console.error('Mentor count fetch error:', countError);
+      }
+
+      // Build count map
       const countMap: Record<string, number> = {};
       mentorCounts?.forEach(m => {
         countMap[m.mentor_id] = (countMap[m.mentor_id] || 0) + 1;
       });
 
-      const mentorsWithDetails: FacultyWithProfile[] = facultyData.map(faculty => {
-        const profile = faculty.profiles as unknown as { full_name: string; email: string; avatar_url: string | null } | null;
+      // Step 4: Combine all data
+      const mentorsWithDetails: FacultyWithProfile[] = facultyProfiles.map(faculty => {
+        const profile = profiles?.find(p => p.user_id === faculty.user_id);
         return {
           user_id: faculty.user_id,
-          full_name: profile?.full_name || 'Unknown',
+          full_name: profile?.full_name || 'Unknown Faculty',
           email: profile?.email || '',
           department: faculty.department,
           designation: faculty.designation,
@@ -161,9 +125,11 @@ export const useMentor = (userId?: string, userRole?: string) => {
         };
       });
 
+      console.log('Mentors loaded:', mentorsWithDetails);
       setAvailableMentors(mentorsWithDetails);
     } catch (error) {
       console.error('Error fetching available mentors:', error);
+      setAvailableMentors([]);
     }
   };
 
