@@ -432,13 +432,13 @@ const RecruiterInterviews: React.FC = () => {
           >
             <Card variant="elevated">
               <CardHeader>
-                <CardTitle>All Interviews</CardTitle>
+                <CardTitle>Pending Interviews</CardTitle>
               </CardHeader>
               <CardContent>
-                {interviews.length === 0 ? (
+                {upcomingInterviews.length === 0 ? (
                   <div className="py-12 text-center">
                     <Calendar className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
-                    <p className="text-muted-foreground">No interviews scheduled</p>
+                    <p className="text-muted-foreground">No pending interviews</p>
                     {shortlistedCandidates.length > 0 && (
                       <Button 
                         variant="accent" 
@@ -451,7 +451,7 @@ const RecruiterInterviews: React.FC = () => {
                   </div>
                 ) : (
                   <div className="space-y-3">
-                    {interviews.map((interview, index) => {
+                    {upcomingInterviews.map((interview, index) => {
                       const status = getInterviewStatus(interview);
                       const statusStyle = statusConfig[status] || statusConfig.scheduled;
                       const isScheduled = status === 'scheduled';
