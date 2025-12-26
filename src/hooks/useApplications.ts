@@ -12,6 +12,13 @@ interface ApplicationWithDetails extends Application {
     title: string;
     company_name: string;
     location: string | null;
+    description?: string | null;
+    job_type?: string | null;
+    salary_min?: number | null;
+    salary_max?: number | null;
+    min_cgpa?: number | null;
+    required_skills?: string[] | null;
+    deadline?: string | null;
   } | null;
   student_profile?: {
     full_name: string;
@@ -94,7 +101,7 @@ export const useApplications = (role: 'student' | 'recruiter' | 'faculty' | 'pla
           .from('applications')
           .select(`
             *,
-            jobs (id, title, company_name, location)
+            jobs (id, title, company_name, location, description, job_type, salary_min, salary_max, min_cgpa, required_skills, deadline)
           `)
           .order('created_at', { ascending: false });
         

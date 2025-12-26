@@ -20,6 +20,7 @@ import { useSupabaseAuthContext } from '@/contexts/SupabaseAuthContext';
 import { format } from 'date-fns';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import StudentProfileModal from '@/components/faculty/StudentProfileModal';
+import JobDetailsModal from '@/components/faculty/JobDetailsModal';
 
 const FacultyApprovals: React.FC = () => {
   const { user, role } = useSupabaseAuthContext();
@@ -31,6 +32,7 @@ const FacultyApprovals: React.FC = () => {
   });
   const [rejectNotes, setRejectNotes] = useState('');
   const [viewingStudent, setViewingStudent] = useState<any>(null);
+  const [viewingJob, setViewingJob] = useState<any>(null);
 
   const pendingApplications = applications.filter(app => app.status === 'pending');
 
@@ -182,8 +184,27 @@ const FacultyApprovals: React.FC = () => {
                           github_url: app.student_profile?.github_url,
                         })}
                       >
-                        <Eye className="w-4 h-4 mr-1" />
-                        View Profile
+                        <User className="w-4 h-4 mr-1" />
+                        Student
+                      </Button>
+                      <Button 
+                        size="sm" 
+                        variant="outline"
+                        onClick={() => setViewingJob({
+                          title: app.jobs?.title,
+                          company_name: app.jobs?.company_name,
+                          description: app.jobs?.description,
+                          location: app.jobs?.location,
+                          job_type: app.jobs?.job_type,
+                          salary_min: app.jobs?.salary_min,
+                          salary_max: app.jobs?.salary_max,
+                          min_cgpa: app.jobs?.min_cgpa,
+                          required_skills: app.jobs?.required_skills,
+                          deadline: app.jobs?.deadline,
+                        })}
+                      >
+                        <Briefcase className="w-4 h-4 mr-1" />
+                        Job
                       </Button>
                       <Button 
                         size="sm" 
@@ -261,6 +282,13 @@ const FacultyApprovals: React.FC = () => {
           student={viewingStudent}
         />
       )}
+
+      {/* Job Details Modal */}
+      <JobDetailsModal
+        isOpen={!!viewingJob}
+        onClose={() => setViewingJob(null)}
+        job={viewingJob}
+      />
     </div>
   );
 };
