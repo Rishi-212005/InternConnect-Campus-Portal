@@ -10,6 +10,8 @@ import {
   Eye,
   TrendingUp,
   Loader2,
+  User,
+  Briefcase,
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -20,6 +22,8 @@ import PendingApprovalScreen from '@/components/layout/PendingApprovalScreen';
 import { useSupabaseAuthContext } from '@/contexts/SupabaseAuthContext';
 import { useApplications } from '@/hooks/useApplications';
 import { supabase } from '@/integrations/supabase/client';
+import StudentProfileModal from '@/components/faculty/StudentProfileModal';
+import JobDetailsModal from '@/components/faculty/JobDetailsModal';
 
 // Import sub-pages
 import FacultyStudents from './FacultyStudents';
@@ -36,6 +40,8 @@ const FacultyHome: React.FC = () => {
   const [studentCount, setStudentCount] = useState(0);
   const [approvedThisMonth, setApprovedThisMonth] = useState(0);
   const [isLoadingStats, setIsLoadingStats] = useState(true);
+  const [viewingStudent, setViewingStudent] = useState<any>(null);
+  const [viewingJob, setViewingJob] = useState<any>(null);
 
   // Fetch additional stats
   useEffect(() => {
@@ -202,7 +208,46 @@ const FacultyHome: React.FC = () => {
                         </p>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2 ml-auto md:ml-0">
+                    <div className="flex flex-wrap items-center gap-2 ml-auto md:ml-0">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setViewingStudent({
+                          full_name: app.student_profile?.full_name || 'Unknown',
+                          email: app.student_profile?.email || '',
+                          phone: app.student_profile?.phone,
+                          department: app.student_profile?.department,
+                          cgpa: app.student_profile?.cgpa,
+                          skills: app.student_profile?.skills,
+                          resume_url: app.student_profile?.resume_url,
+                          roll_number: app.student_profile?.roll_number,
+                          year_of_study: app.student_profile?.year_of_study,
+                          linkedin_url: app.student_profile?.linkedin_url,
+                          github_url: app.student_profile?.github_url,
+                        })}
+                      >
+                        <User className="w-4 h-4 mr-1" />
+                        Student
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setViewingJob({
+                          title: app.jobs?.title,
+                          company_name: app.jobs?.company_name,
+                          description: app.jobs?.description,
+                          location: app.jobs?.location,
+                          job_type: app.jobs?.job_type,
+                          salary_min: app.jobs?.salary_min,
+                          salary_max: app.jobs?.salary_max,
+                          min_cgpa: app.jobs?.min_cgpa,
+                          required_skills: app.jobs?.required_skills,
+                          deadline: app.jobs?.deadline,
+                        })}
+                      >
+                        <Briefcase className="w-4 h-4 mr-1" />
+                        Job
+                      </Button>
                       <Button
                         variant="accent"
                         size="sm"
@@ -227,6 +272,22 @@ const FacultyHome: React.FC = () => {
           </CardContent>
         </Card>
       </motion.div>
+
+      {/* Student Profile Modal */}
+      {viewingStudent && (
+        <StudentProfileModal
+          isOpen={!!viewingStudent}
+          onClose={() => setViewingStudent(null)}
+          student={viewingStudent}
+        />
+      )}
+
+      {/* Job Details Modal */}
+      <JobDetailsModal
+        isOpen={!!viewingJob}
+        onClose={() => setViewingJob(null)}
+        job={viewingJob}
+      />
     </div>
   );
 };
