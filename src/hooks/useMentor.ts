@@ -93,22 +93,21 @@ export const useMentor = (userId?: string, userRole?: string) => {
         console.error('Profiles fetch error:', profilesError);
       }
 
-      // Step 3: Get student count for each mentor from approved mentor_requests
+      // Step 3: Get student count for each mentor using the RPC function
       const { data: mentorCounts, error: countError } = await supabase
-        .from('mentor_requests')
-        .select('mentor_id')
-        .eq('status', 'approved')
-        .in('mentor_id', userIds);
+        .rpc('get_mentor_student_counts', { mentor_ids: userIds });
 
       if (countError) {
         console.error('Mentor count fetch error:', countError);
       }
 
-      // Build count map
+      // Build count map from RPC result
       const countMap: Record<string, number> = {};
-      mentorCounts?.forEach(m => {
-        countMap[m.mentor_id] = (countMap[m.mentor_id] || 0) + 1;
-      });
+      if (mentorCounts && Array.isArray(mentorCounts)) {
+        mentorCounts.forEach((m: { mentor_id: string; student_count: number }) => {
+          countMap[m.mentor_id] = m.student_count;
+        });
+      }
 
       // Step 4: Combine all data
       const mentorsWithDetails: FacultyWithProfile[] = facultyProfiles.map(faculty => {
