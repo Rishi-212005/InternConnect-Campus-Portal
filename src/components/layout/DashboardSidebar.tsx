@@ -20,7 +20,6 @@ import {
   ChevronRight,
   Rocket,
   Code,
-  Trophy,
   UserCheck,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -58,7 +57,7 @@ const roleNavItems: Record<AppRole, NavItem[]> = {
     { icon: UserCheck, label: 'User Approvals', path: '/placement/mentors' },
     { icon: Users, label: 'Candidates', path: '/placement/candidates' },
     { icon: Code, label: 'Assessments', path: '/placement/assessments' },
-    { icon: Trophy, label: 'Exam Results', path: '/placement/results' },
+    { icon: Calendar, label: 'Interviews', path: '/placement/interviews' },
     { icon: Building2, label: 'Companies', path: '/placement/companies' },
     { icon: ClipboardList, label: 'Reports', path: '/placement/reports' },
   ],

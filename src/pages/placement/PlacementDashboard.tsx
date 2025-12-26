@@ -29,7 +29,6 @@ import PlacementMentorApprovals from './PlacementMentorApprovals';
 import PlacementInterviews from './PlacementInterviews';
 import PlacementReports from './PlacementReports';
 import PlacementAssessments from './PlacementAssessments';
-import PlacementExamResults from './PlacementExamResults';
 import PlacementCandidates from './PlacementCandidates';
 import PlacementCompanyRounds from './PlacementCompanyRounds';
 const getPriorityColor = (priority: string) => {
@@ -336,7 +335,6 @@ const PlacementDashboard: React.FC = () => {
         <Route path="mentors" element={<PlacementMentorApprovals />} />
         <Route path="interviews" element={<PlacementInterviews />} />
         <Route path="assessments" element={<PlacementAssessments />} />
-        <Route path="results" element={<PlacementExamResults />} />
         <Route path="candidates" element={<PlacementCandidates />} />
         <Route path="candidates/:jobId" element={<PlacementCompanyRounds />} />
       </Routes>
