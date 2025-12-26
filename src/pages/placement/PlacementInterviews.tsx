@@ -270,6 +270,7 @@ const PlacementInterviews: React.FC = () => {
 
     try {
       const scheduledAt = new Date(`${scheduleDate}T${scheduleTime}`).toISOString();
+      const scheduledDate = new Date(scheduledAt);
 
       // Create interview schedules for all selected students
       for (const appId of selectedStudentIds) {
@@ -291,19 +292,37 @@ const PlacementInterviews: React.FC = () => {
 
         if (insertError) throw insertError;
 
-        // Notify student
+        // Notify student (in-app)
         await supabase.from('notifications').insert({
           user_id: student.student_id,
           title: 'Interview Scheduled',
-          message: `Your interview for ${student.job_title} at ${student.company_name} is scheduled for ${format(new Date(scheduledAt), 'PPp')}${meetingLink ? '. Meeting link: ' + meetingLink : ''}`,
+          message: `Your interview for ${student.job_title} at ${student.company_name} is scheduled for ${format(scheduledDate, 'PPp')}${meetingLink ? '. Meeting link: ' + meetingLink : ''}`,
           link: '/student/schedule',
+        });
+
+        // Send email to student
+        await supabase.functions.invoke('send-notification', {
+          body: {
+            type: 'interview_scheduled',
+            recipientEmail: student.email,
+            recipientName: student.full_name,
+            data: {
+              jobTitle: student.job_title,
+              companyName: student.company_name,
+              interviewDate: format(scheduledDate, 'EEEE, MMMM d, yyyy'),
+              interviewTime: format(scheduledDate, 'h:mm a'),
+              duration: duration,
+              meetingLink: meetingLink || undefined,
+              notes: notes || undefined,
+            },
+          },
         });
 
         // Notify recruiter
         await supabase.from('notifications').insert({
           user_id: student.recruiter_id,
           title: 'Interview Scheduled',
-          message: `Interview scheduled with ${student.full_name} for ${student.job_title} on ${format(new Date(scheduledAt), 'PPp')}`,
+          message: `Interview scheduled with ${student.full_name} for ${student.job_title} on ${format(scheduledDate, 'PPp')}`,
           link: '/recruiter/interviews',
         });
 
@@ -312,13 +331,13 @@ const PlacementInterviews: React.FC = () => {
           await supabase.from('notifications').insert({
             user_id: student.mentor_id,
             title: 'Student Interview Scheduled',
-            message: `Your mentee ${student.full_name} has an interview scheduled for ${student.job_title} at ${student.company_name} on ${format(new Date(scheduledAt), 'PPp')}`,
+            message: `Your mentee ${student.full_name} has an interview scheduled for ${student.job_title} at ${student.company_name} on ${format(scheduledDate, 'PPp')}`,
             link: '/faculty/students',
           });
         }
       }
 
-      toast({ title: 'Success', description: `Interview scheduled for ${selectedStudentIds.length} student(s)` });
+      toast({ title: 'Success', description: `Interview scheduled for ${selectedStudentIds.length} student(s). Emails sent.` });
       setShowScheduleDialog(false);
       fetchData();
     } catch (error: any) {
