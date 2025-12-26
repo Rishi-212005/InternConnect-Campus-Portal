@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -23,7 +23,8 @@ import {
   Star,
   Loader2,
 } from 'lucide-react';
-import { supabase } from '@/integrations/supabase/client';
+import { openResume } from '@/lib/resumeUtils';
+import { useToast } from '@/hooks/use-toast';
 
 interface StudentProfileModalProps {
   isOpen: boolean;
@@ -51,6 +52,7 @@ const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
 }) => {
   const initials = student.full_name?.split(' ').map(n => n[0]).join('').toUpperCase() || 'S';
   const [isLoadingResume, setIsLoadingResume] = useState(false);
+  const { toast } = useToast();
 
   const handleDownloadResume = async () => {
     if (!student.resume_url) return;
@@ -58,37 +60,13 @@ const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
     setIsLoadingResume(true);
     
     try {
-      let filePath = student.resume_url;
-      
-      // If it's a full Supabase URL, extract the path
-      if (student.resume_url.includes('/storage/v1/object/')) {
-        const match = student.resume_url.match(/\/resumes\/(.+)$/);
-        if (match) {
-          filePath = match[1];
-        }
-      }
-      
-      // Check if it's an external URL (not a storage path)
-      if (student.resume_url.startsWith('http') && !student.resume_url.includes('supabase')) {
-        window.open(student.resume_url, '_blank');
-        return;
-      }
-      
-      // Get a signed URL for the private resumes bucket
-      const { data, error } = await supabase.storage
-        .from('resumes')
-        .createSignedUrl(filePath, 3600); // 1 hour expiry
-      
-      if (error) {
-        console.error('Error getting signed URL:', error);
-        throw error;
-      }
-      
-      if (data?.signedUrl) {
-        window.open(data.signedUrl, '_blank');
+      const result = await openResume(student.resume_url);
+      if (!result.success) {
+        toast({ title: 'Error', description: result.error || 'Failed to open resume', variant: 'destructive' });
       }
     } catch (error) {
       console.error('Error opening resume:', error);
+      toast({ title: 'Error', description: 'Failed to open resume', variant: 'destructive' });
     } finally {
       setIsLoadingResume(false);
     }

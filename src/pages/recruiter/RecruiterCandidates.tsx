@@ -25,6 +25,7 @@ import { useSupabaseAuthContext } from '@/contexts/SupabaseAuthContext';
 import { useToast } from '@/hooks/use-toast';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { openResume } from '@/lib/resumeUtils';
 
 interface SelectedCandidate {
   id: string;
@@ -131,26 +132,15 @@ const RecruiterCandidates: React.FC = () => {
     fetchSelectedCandidates();
   }, [user]);
 
-  const handleDownloadResume = async (resumeUrl: string | null | undefined, studentName: string) => {
+  const handleDownloadResume = async (resumeUrl: string | null | undefined) => {
     if (!resumeUrl) {
       toast({ title: 'Error', description: 'No resume available', variant: 'destructive' });
       return;
     }
 
-    try {
-      if (resumeUrl.startsWith('http')) {
-        window.open(resumeUrl, '_blank');
-      } else {
-        const { data } = await supabase.storage
-          .from('resumes')
-          .createSignedUrl(resumeUrl, 3600);
-        
-        if (data?.signedUrl) {
-          window.open(data.signedUrl, '_blank');
-        }
-      }
-    } catch (error) {
-      toast({ title: 'Error', description: 'Failed to open resume', variant: 'destructive' });
+    const result = await openResume(resumeUrl);
+    if (!result.success) {
+      toast({ title: 'Error', description: result.error || 'Failed to open resume', variant: 'destructive' });
     }
   };
 
@@ -345,8 +335,7 @@ const RecruiterCandidates: React.FC = () => {
                                   size="sm"
                                   className="gap-1"
                                   onClick={() => handleDownloadResume(
-                                    candidate.studentProfile?.resume_url, 
-                                    candidate.student?.full_name || 'candidate'
+                                    candidate.studentProfile?.resume_url
                                   )}
                                 >
                                   <Download className="w-4 h-4" />
@@ -470,8 +459,7 @@ const RecruiterCandidates: React.FC = () => {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {viewingCandidate.studentProfile?.resume_url && (
                     <Card variant="interactive" className="cursor-pointer" onClick={() => handleDownloadResume(
-                      viewingCandidate.studentProfile?.resume_url,
-                      viewingCandidate.student?.full_name || 'candidate'
+                      viewingCandidate.studentProfile?.resume_url
                     )}>
                       <CardContent className="py-6 flex items-center gap-4">
                         <div className="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center">
