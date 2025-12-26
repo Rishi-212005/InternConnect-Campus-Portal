@@ -197,7 +197,7 @@ const PlacementExamResults: React.FC = () => {
           })
           .eq('id', result.id);
 
-        // Notify student
+        // Notify student (in-app)
         const message = status === 'passed' 
           ? `Congratulations! You have passed the assessment for ${result.assessment?.jobs?.title} at ${result.assessment?.jobs?.company_name}. ${nextRoundInfo || 'Interview will be scheduled soon.'}`
           : `We regret to inform you that you did not pass the assessment for ${result.assessment?.jobs?.title} at ${result.assessment?.jobs?.company_name}. Better luck next time!`;
@@ -208,11 +208,30 @@ const PlacementExamResults: React.FC = () => {
           message,
           link: '/student/applications',
         });
+
+        // Send email notification
+        if (result.profile?.email) {
+          await supabase.functions.invoke('send-notification', {
+            body: {
+              type: status === 'passed' ? 'exam_passed' : 'exam_failed',
+              recipientEmail: result.profile.email,
+              recipientName: result.profile.full_name || 'Student',
+              data: {
+                jobTitle: result.assessment?.jobs?.title,
+                companyName: result.assessment?.jobs?.company_name,
+                assessmentTitle: result.assessment?.title,
+                score: `${result.percentage_score?.toFixed(1)}%`,
+                passingScore: `${result.assessment?.passing_score}%`,
+                nextRoundInfo: status === 'passed' ? (nextRoundInfo || 'Interview will be scheduled soon') : undefined,
+              },
+            },
+          });
+        }
       }
 
       toast({ 
         title: 'Results Confirmed', 
-        description: `${selectedResultsData.length} student(s) notified` 
+        description: `${selectedResultsData.length} student(s) notified via email` 
       });
       
       setSelectedResults([]);

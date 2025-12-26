@@ -284,7 +284,14 @@ const RecruiterInterviews: React.FC = () => {
         throw appError;
       }
 
-      // Send notification to student
+      // Get recruiter's company name
+      const { data: recruiterProfile } = await supabase
+        .from('recruiter_profiles')
+        .select('company_name')
+        .eq('user_id', user?.id)
+        .single();
+
+      // Send notification to student (in-app)
       await supabase
         .from('notifications')
         .insert({
@@ -295,6 +302,19 @@ const RecruiterInterviews: React.FC = () => {
             : `Unfortunately, you were not selected for the position of ${interview.application.job_title}. Keep trying!`,
           link: '/student/applications'
         });
+
+      // Send email to student
+      await supabase.functions.invoke('send-notification', {
+        body: {
+          type: decision === 'selected' ? 'candidate_selected' : 'candidate_rejected',
+          recipientEmail: interview.application.student_email,
+          recipientName: interview.application.student_name,
+          data: {
+            jobTitle: interview.application.job_title,
+            companyName: recruiterProfile?.company_name || 'the company',
+          },
+        },
+      });
 
       // Get student's mentor
       const { data: mentorRequest } = await supabase
@@ -340,8 +360,8 @@ const RecruiterInterviews: React.FC = () => {
       toast({ 
         title: 'Success', 
         description: decision === 'selected' 
-          ? 'Candidate marked as selected!' 
-          : 'Candidate marked as rejected'
+          ? 'Candidate marked as selected! Email sent.' 
+          : 'Candidate marked as rejected. Email sent.'
       });
       // Don't call fetchInterviews here - we already removed the interview from state
     } catch (error: any) {

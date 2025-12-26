@@ -137,13 +137,15 @@ const PlacementMentorApprovals: React.FC = () => {
 
       if (error) throw error;
 
+      // Send email notification
       if (faculty.profile?.email) {
         await supabase.functions.invoke('send-notification', {
           body: {
-            type: 'mentor_approved',
+            type: approve ? 'mentor_approved' : 'mentor_rejected',
             recipientEmail: faculty.profile.email,
             recipientName: faculty.profile.full_name || 'Faculty Member',
             data: {
+              loginUrl: window.location.origin,
               message: approve ? 'Your account has been approved' : 'Your account has been rejected',
             },
           },
@@ -152,7 +154,7 @@ const PlacementMentorApprovals: React.FC = () => {
 
       toast({
         title: approve ? 'Faculty Approved' : 'Faculty Rejected',
-        description: `${faculty.profile?.full_name || 'Faculty member'} has been ${approve ? 'approved' : 'rejected'}.`,
+        description: `${faculty.profile?.full_name || 'Faculty member'} has been ${approve ? 'approved' : 'rejected'}. Email notification sent.`,
       });
 
       fetchPendingFaculty();
@@ -179,13 +181,15 @@ const PlacementMentorApprovals: React.FC = () => {
 
       if (error) throw error;
 
+      // Send email notification
       if (student.profile?.email) {
         await supabase.functions.invoke('send-notification', {
           body: {
-            type: 'student_approved',
+            type: approve ? 'student_approved' : 'student_rejected',
             recipientEmail: student.profile.email,
             recipientName: student.profile.full_name || 'Student',
             data: {
+              loginUrl: window.location.origin,
               message: approve ? 'Your account has been verified' : 'Your account verification was rejected',
             },
           },
@@ -194,7 +198,7 @@ const PlacementMentorApprovals: React.FC = () => {
 
       toast({
         title: approve ? 'Student Verified' : 'Student Rejected',
-        description: `${student.profile?.full_name || 'Student'} has been ${approve ? 'verified' : 'rejected'}.`,
+        description: `${student.profile?.full_name || 'Student'} has been ${approve ? 'verified' : 'rejected'}. Email notification sent.`,
       });
 
       fetchPendingStudents();
