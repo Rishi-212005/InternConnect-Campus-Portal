@@ -22,7 +22,7 @@ import {
   Trophy,
   AlertCircle,
   Eye,
-  Calendar,
+  Calendar as CalendarIcon,
   Send,
   ListPlus,
   Filter,
@@ -826,7 +826,7 @@ const PlacementCompanyRounds: React.FC = () => {
                 {/* Interview Stage */}
                 <div className="flex flex-col items-center min-w-[120px]">
                   <div className="w-12 h-12 rounded-full flex items-center justify-center text-lg font-bold bg-accent/20 text-accent">
-                    <Calendar className="w-6 h-6" />
+                    <CalendarIcon className="w-6 h-6" />
                   </div>
                   <p className="text-sm font-medium mt-2 text-center">Interview</p>
                   <p className="text-xs text-muted-foreground">Final stage</p>
