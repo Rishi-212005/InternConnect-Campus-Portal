@@ -102,15 +102,26 @@ const PlacementCompanyRounds: React.FC = () => {
         setJobInfo(job);
       }
 
-      // Get latest assessment for this job (single round - use the most recent one)
+      // Get the active assessment for this job (prioritize active over draft)
       const { data: assessments } = await supabase
         .from('assessments')
         .select('id, title, status, passing_score')
         .eq('job_id', jobId)
+        .in('status', ['active', 'scheduled', 'completed'])
         .order('created_at', { ascending: false })
         .limit(1);
 
-      const currentAssessment = assessments?.[0] || null;
+      // If no active assessment found, fall back to any assessment
+      let currentAssessment = assessments?.[0] || null;
+      if (!currentAssessment) {
+        const { data: anyAssessment } = await supabase
+          .from('assessments')
+          .select('id, title, status, passing_score')
+          .eq('job_id', jobId)
+          .order('created_at', { ascending: false })
+          .limit(1);
+        currentAssessment = anyAssessment?.[0] || null;
+      }
       setAssessment(currentAssessment);
 
       // Get faculty-approved applications for this job
