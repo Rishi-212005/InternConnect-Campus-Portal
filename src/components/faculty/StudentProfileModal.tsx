@@ -58,41 +58,37 @@ const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
     setIsLoadingResume(true);
     
     try {
-      // Check if it's a Supabase storage URL
-      if (student.resume_url.includes('supabase') || student.resume_url.startsWith('resumes/')) {
-        // Extract the file path from the URL
-        let filePath = student.resume_url;
-        
-        // If it's a full URL, extract the path
-        if (student.resume_url.includes('/storage/v1/object/')) {
-          const match = student.resume_url.match(/\/resumes\/(.+)$/);
-          if (match) {
-            filePath = match[1];
-          }
-        } else if (student.resume_url.startsWith('resumes/')) {
-          filePath = student.resume_url.replace('resumes/', '');
+      let filePath = student.resume_url;
+      
+      // If it's a full Supabase URL, extract the path
+      if (student.resume_url.includes('/storage/v1/object/')) {
+        const match = student.resume_url.match(/\/resumes\/(.+)$/);
+        if (match) {
+          filePath = match[1];
         }
-        
-        // Get a signed URL for the private resumes bucket
-        const { data, error } = await supabase.storage
-          .from('resumes')
-          .createSignedUrl(filePath, 3600); // 1 hour expiry
-        
-        if (error) {
-          console.error('Error getting signed URL:', error);
-          // Fallback to direct URL
-          window.open(student.resume_url, '_blank');
-        } else if (data?.signedUrl) {
-          window.open(data.signedUrl, '_blank');
-        }
-      } else {
-        // External URL, open directly
+      }
+      
+      // Check if it's an external URL (not a storage path)
+      if (student.resume_url.startsWith('http') && !student.resume_url.includes('supabase')) {
         window.open(student.resume_url, '_blank');
+        return;
+      }
+      
+      // Get a signed URL for the private resumes bucket
+      const { data, error } = await supabase.storage
+        .from('resumes')
+        .createSignedUrl(filePath, 3600); // 1 hour expiry
+      
+      if (error) {
+        console.error('Error getting signed URL:', error);
+        throw error;
+      }
+      
+      if (data?.signedUrl) {
+        window.open(data.signedUrl, '_blank');
       }
     } catch (error) {
       console.error('Error opening resume:', error);
-      // Fallback to direct URL
-      window.open(student.resume_url, '_blank');
     } finally {
       setIsLoadingResume(false);
     }

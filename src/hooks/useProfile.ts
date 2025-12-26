@@ -162,15 +162,11 @@ export const useProfile = (userId: string | undefined) => {
       
       if (uploadError) throw uploadError;
       
-      const { data: { publicUrl } } = supabase.storage
-        .from('resumes')
-        .getPublicUrl(filePath);
-      
-      // Update student profile with new resume URL
-      await updateStudentProfile({ resume_url: publicUrl });
+      // Store just the path for private bucket - we'll use signed URLs when viewing
+      await updateStudentProfile({ resume_url: filePath });
       
       toast({ title: 'Success', description: 'Resume uploaded successfully!' });
-      return { url: publicUrl, error: null };
+      return { url: filePath, error: null };
     } catch (error: any) {
       toast({ title: 'Error', description: 'Failed to upload resume', variant: 'destructive' });
       return { url: null, error };
