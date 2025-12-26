@@ -178,6 +178,11 @@ const PlacementCompanyRounds: React.FC = () => {
 
           const attempt = attemptsMap.get(app.student_id);
           
+          // Skip students who have already been added to interview list or selected
+          if (app.status === 'interview' || app.status === 'selected') {
+            return;
+          }
+          
           let currentStatus: 'pending' | 'passed' | 'failed' = 'pending';
           
           if (attempt) {
