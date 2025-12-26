@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { 
   Calendar, 
   Clock, 
@@ -12,20 +13,20 @@ import {
   Loader2,
   Plus,
   User,
-  Briefcase,
   Building2,
   CheckCircle,
   XCircle,
   Link2,
   ChevronDown,
   ChevronUp,
-  Users
+  Users,
+  Send
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useSupabaseAuthContext } from '@/contexts/SupabaseAuthContext';
 import { format } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 interface Interview {
@@ -48,317 +49,181 @@ interface Interview {
     job?: {
       title: string;
       company_name: string;
+      recruiter_id: string;
     };
+    mentor_id?: string;
   } | null;
 }
 
-interface EligibleApplication {
-  id: string;
+interface EligibleStudent {
+  application_id: string;
   student_id: string;
+  full_name: string;
+  email: string;
   job_id: string;
-  status: string;
-  student_profile?: {
-    full_name: string;
-    email: string;
-  };
-  job?: {
-    title: string;
-    company_name: string;
-  };
+  job_title: string;
+  company_name: string;
+  recruiter_id: string;
+  mentor_id?: string;
 }
 
-interface CompanyInterviewGroup {
+interface CompanyGroup {
   company_name: string;
   job_title: string;
   job_id: string;
+  recruiter_id: string;
+  students: EligibleStudent[];
   interviews: Interview[];
 }
 
 const PlacementInterviews: React.FC = () => {
   const { user } = useSupabaseAuthContext();
   const { toast } = useToast();
-  const [interviews, setInterviews] = useState<Interview[]>([]);
-  const [eligibleApplications, setEligibleApplications] = useState<EligibleApplication[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [showScheduleDialog, setShowScheduleDialog] = useState(false);
-  const [processingId, setProcessingId] = useState<string | null>(null);
+  const [companyGroups, setCompanyGroups] = useState<CompanyGroup[]>([]);
   const [expandedCompanies, setExpandedCompanies] = useState<Set<string>>(new Set());
-
-  // Schedule form
-  const [selectedApplication, setSelectedApplication] = useState('');
+  
+  // Schedule dialog
+  const [showScheduleDialog, setShowScheduleDialog] = useState(false);
+  const [selectedCompany, setSelectedCompany] = useState<CompanyGroup | null>(null);
   const [scheduleDate, setScheduleDate] = useState('');
   const [scheduleTime, setScheduleTime] = useState('');
   const [duration, setDuration] = useState('60');
   const [meetingLink, setMeetingLink] = useState('');
+  const [notes, setNotes] = useState('');
+  const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>([]);
+  
+  const [processingId, setProcessingId] = useState<string | null>(null);
 
-  const fetchInterviews = async () => {
+  useEffect(() => {
+    fetchData();
+  }, []);
+
+  const fetchData = async () => {
     try {
-      const { data: interviewData, error } = await supabase
-        .from('interview_schedules')
-        .select('*')
-        .order('scheduled_at', { ascending: true });
-
-      if (error) throw error;
-
-      // Fetch related application data
-      const interviewsWithDetails = await Promise.all(
-        (interviewData || []).map(async (interview) => {
-          const { data: appData } = await supabase
-            .from('applications')
-            .select('id, student_id, job_id, status')
-            .eq('id', interview.application_id)
-            .single();
-
-          if (!appData) return { ...interview, application: null };
-
-          // Get student profile
-          const { data: profileData } = await supabase
-            .from('profiles')
-            .select('full_name, email')
-            .eq('user_id', appData.student_id)
-            .single();
-
-          // Get job details
-          const { data: jobData } = await supabase
-            .from('jobs')
-            .select('title, company_name')
-            .eq('id', appData.job_id)
-            .single();
-
-          return {
-            ...interview,
-            application: {
-              ...appData,
-              student_profile: profileData,
-              job: jobData,
-            },
-          };
-        })
-      );
-
-      setInterviews(interviewsWithDetails);
-    } catch (error) {
-      console.error('Error fetching interviews:', error);
-    }
-  };
-
-  const fetchEligibleApplications = async () => {
-    try {
-      // Fetch applications that have interview status
-      const { data: appData, error } = await supabase
+      // Fetch applications with interview status
+      const { data: apps, error: appsError } = await supabase
         .from('applications')
         .select('id, student_id, job_id, status')
         .eq('status', 'interview');
 
-      if (error) throw error;
+      if (appsError) throw appsError;
 
-      // Filter out applications that already have interviews
-      const existingInterviewAppIds = interviews.map(i => i.application_id);
-      const eligibleApps = (appData || []).filter(app => !existingInterviewAppIds.includes(app.id));
-
-      // Fetch details for eligible apps
-      const appsWithDetails = await Promise.all(
-        eligibleApps.map(async (app) => {
-          const { data: profileData } = await supabase
-            .from('profiles')
-            .select('full_name, email')
-            .eq('user_id', app.student_id)
-            .single();
-
-          const { data: jobData } = await supabase
-            .from('jobs')
-            .select('title, company_name')
-            .eq('id', app.job_id)
-            .single();
-
-          return {
-            ...app,
-            student_profile: profileData,
-            job: jobData,
-          };
-        })
-      );
-
-      setEligibleApplications(appsWithDetails);
-    } catch (error) {
-      console.error('Error fetching eligible applications:', error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchInterviews();
-  }, []);
-
-  useEffect(() => {
-    if (interviews.length >= 0) {
-      fetchEligibleApplications();
-    }
-  }, [interviews]);
-
-  const handleScheduleInterview = async () => {
-    if (!selectedApplication || !scheduleDate || !scheduleTime || !user) {
-      toast({
-        title: 'Missing information',
-        description: 'Please fill all required fields.',
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    setProcessingId('scheduling');
-
-    try {
-      const scheduledAt = new Date(`${scheduleDate}T${scheduleTime}`).toISOString();
-
-      const { error: insertError } = await supabase
+      // Fetch all interviews
+      const { data: interviewsData, error: intError } = await supabase
         .from('interview_schedules')
-        .insert({
-          application_id: selectedApplication,
-          scheduled_at: scheduledAt,
-          duration_minutes: parseInt(duration),
-          meeting_link: meetingLink || null,
-          scheduled_by: user.id,
-          interview_status: 'scheduled',
-        });
+        .select('*')
+        .order('scheduled_at', { ascending: true });
 
-      if (insertError) throw insertError;
+      if (intError) throw intError;
 
-      // Get application details for email
-      const app = eligibleApplications.find(a => a.id === selectedApplication);
-      if (app?.student_profile?.email) {
-        await supabase.functions.invoke('send-notification', {
-          body: {
-            type: 'interview_invite',
-            recipientEmail: app.student_profile.email,
-            recipientName: app.student_profile.full_name || 'Student',
-            data: {
-              jobTitle: app.job?.title || 'Position',
-              companyName: app.job?.company_name || 'Company',
-              interviewDate: format(new Date(scheduledAt), 'MMMM dd, yyyy'),
-              interviewTime: format(new Date(scheduledAt), 'h:mm a'),
-              meetingLink: meetingLink || undefined,
-            },
+      // Get unique job IDs
+      const jobIds = [...new Set(apps?.map(a => a.job_id) || [])];
+      
+      // Fetch job details
+      const { data: jobs } = await supabase
+        .from('jobs')
+        .select('id, title, company_name, recruiter_id')
+        .in('id', jobIds);
+
+      const jobsMap = new Map(jobs?.map(j => [j.id, j]) || []);
+
+      // Fetch student profiles
+      const studentIds = [...new Set(apps?.map(a => a.student_id) || [])];
+      const { data: profiles } = await supabase
+        .from('profiles')
+        .select('user_id, full_name, email')
+        .in('user_id', studentIds);
+
+      const profilesMap = new Map(profiles?.map(p => [p.user_id, p]) || []);
+
+      // Get mentor assignments
+      const { data: mentorRequests } = await supabase
+        .from('mentor_requests')
+        .select('student_id, mentor_id')
+        .eq('status', 'approved')
+        .in('student_id', studentIds);
+
+      const mentorsMap = new Map(mentorRequests?.map(m => [m.student_id, m.mentor_id]) || []);
+
+      // Group by company
+      const groups: Record<string, CompanyGroup> = {};
+
+      apps?.forEach(app => {
+        const job = jobsMap.get(app.job_id);
+        if (!job) return;
+
+        const key = app.job_id;
+        if (!groups[key]) {
+          groups[key] = {
+            company_name: job.company_name,
+            job_title: job.title,
+            job_id: job.id,
+            recruiter_id: job.recruiter_id,
+            students: [],
+            interviews: [],
+          };
+        }
+
+        const profile = profilesMap.get(app.student_id);
+        const existingInterview = interviewsData?.find(i => i.application_id === app.id);
+
+        if (!existingInterview) {
+          groups[key].students.push({
+            application_id: app.id,
+            student_id: app.student_id,
+            full_name: profile?.full_name || 'Unknown',
+            email: profile?.email || '',
+            job_id: app.job_id,
+            job_title: job.title,
+            company_name: job.company_name,
+            recruiter_id: job.recruiter_id,
+            mentor_id: mentorsMap.get(app.student_id),
+          });
+        }
+      });
+
+      // Add interviews with details
+      for (const interview of interviewsData || []) {
+        const app = apps?.find(a => a.id === interview.application_id);
+        if (!app) continue;
+
+        const job = jobsMap.get(app.job_id);
+        const profile = profilesMap.get(app.student_id);
+        if (!job) continue;
+
+        const key = app.job_id;
+        if (!groups[key]) {
+          groups[key] = {
+            company_name: job.company_name,
+            job_title: job.title,
+            job_id: job.id,
+            recruiter_id: job.recruiter_id,
+            students: [],
+            interviews: [],
+          };
+        }
+
+        groups[key].interviews.push({
+          ...interview,
+          application: {
+            id: app.id,
+            student_id: app.student_id,
+            job_id: app.job_id,
+            status: app.status,
+            student_profile: profile ? { full_name: profile.full_name, email: profile.email } : undefined,
+            job: { title: job.title, company_name: job.company_name, recruiter_id: job.recruiter_id },
+            mentor_id: mentorsMap.get(app.student_id),
           },
         });
       }
 
-      // Send in-app notification
-      if (app) {
-        await supabase.from('notifications').insert({
-          user_id: app.student_id,
-          title: 'Interview Scheduled',
-          message: `Your interview for ${app.job?.title} at ${app.job?.company_name} has been scheduled for ${format(new Date(scheduledAt), 'PPp')}`,
-          link: '/student/schedule',
-        });
-      }
-
-      toast({
-        title: 'Interview Scheduled',
-        description: 'The interview has been scheduled and the student has been notified.',
-      });
-
-      setShowScheduleDialog(false);
-      resetForm();
-      fetchInterviews();
-    } catch (error: any) {
-      console.error('Error scheduling interview:', error);
-      toast({
-        title: 'Error',
-        description: error.message || 'Failed to schedule interview.',
-        variant: 'destructive',
-      });
-    } finally {
-      setProcessingId(null);
-    }
-  };
-
-  const handleUpdateStatus = async (interviewId: string, status: string) => {
-    setProcessingId(interviewId);
-
-    try {
-      const { error } = await supabase
-        .from('interview_schedules')
-        .update({ interview_status: status })
-        .eq('id', interviewId);
-
-      if (error) throw error;
-
-      // If completed, update application status
-      if (status === 'completed') {
-        const interview = interviews.find(i => i.id === interviewId);
-        if (interview) {
-          await supabase
-            .from('applications')
-            .update({ status: 'selected' })
-            .eq('id', interview.application_id);
-
-          // Send email notification
-          if (interview.application?.student_profile?.email) {
-            await supabase.functions.invoke('send-notification', {
-              body: {
-                type: 'application_status',
-                recipientEmail: interview.application.student_profile.email,
-                recipientName: interview.application.student_profile.full_name || 'Student',
-                data: {
-                  jobTitle: interview.application.job?.title || 'Position',
-                  companyName: interview.application.job?.company_name || 'Company',
-                  status: 'selected',
-                  message: 'Congratulations! You have been selected for this position.',
-                },
-              },
-            });
-          }
-
-          // Send in-app notification
-          await supabase.from('notifications').insert({
-            user_id: interview.application.student_id,
-            title: 'Congratulations! You have been selected',
-            message: `You have been selected for the position of ${interview.application.job?.title} at ${interview.application.job?.company_name}!`,
-            link: '/student/applications',
-          });
-        }
-      }
-
-      toast({
-        title: 'Status Updated',
-        description: `Interview status updated to ${status}.`,
-      });
-
-      fetchInterviews();
+      setCompanyGroups(Object.values(groups));
     } catch (error) {
-      console.error('Error updating interview status:', error);
-      toast({
-        title: 'Error',
-        description: 'Failed to update interview status.',
-        variant: 'destructive',
-      });
+      console.error('Error fetching data:', error);
+      toast({ title: 'Error', description: 'Failed to load interviews', variant: 'destructive' });
     } finally {
-      setProcessingId(null);
-    }
-  };
-
-  const resetForm = () => {
-    setSelectedApplication('');
-    setScheduleDate('');
-    setScheduleTime('');
-    setDuration('60');
-    setMeetingLink('');
-  };
-
-  const getStatusBadge = (status: string | null) => {
-    switch (status) {
-      case 'scheduled':
-        return <Badge className="bg-blue-100 text-blue-700">Scheduled</Badge>;
-      case 'completed':
-        return <Badge className="bg-green-100 text-green-700">Completed</Badge>;
-      case 'cancelled':
-        return <Badge className="bg-red-100 text-red-700">Cancelled</Badge>;
-      case 'rescheduled':
-        return <Badge className="bg-yellow-100 text-yellow-700">Rescheduled</Badge>;
-      default:
-        return <Badge className="bg-gray-100 text-gray-700">Unknown</Badge>;
+      setIsLoading(false);
     }
   };
 
@@ -374,53 +239,158 @@ const PlacementInterviews: React.FC = () => {
     });
   };
 
-  // Group interviews by company
-  const groupInterviewsByCompany = (): CompanyInterviewGroup[] => {
-    const groups: Record<string, CompanyInterviewGroup> = {};
-    
-    interviews.forEach(interview => {
-      if (!interview.application?.job) return;
-      
-      const key = interview.application.job_id;
-      if (!groups[key]) {
-        groups[key] = {
-          company_name: interview.application.job.company_name,
-          job_title: interview.application.job.title,
-          job_id: interview.application.job_id,
-          interviews: [],
-        };
-      }
-      groups[key].interviews.push(interview);
-    });
-
-    return Object.values(groups);
+  const openScheduleDialog = (company: CompanyGroup) => {
+    setSelectedCompany(company);
+    setSelectedStudentIds(company.students.map(s => s.application_id));
+    setScheduleDate('');
+    setScheduleTime('');
+    setDuration('60');
+    setMeetingLink('');
+    setNotes('');
+    setShowScheduleDialog(true);
   };
 
-  // Group eligible applications by company
-  const groupEligibleByCompany = () => {
-    const groups: Record<string, EligibleApplication[]> = {};
-    
-    eligibleApplications.forEach(app => {
-      if (!app.job) return;
-      const key = app.job.company_name;
-      if (!groups[key]) {
-        groups[key] = [];
-      }
-      groups[key].push(app);
-    });
+  const handleScheduleInterview = async () => {
+    if (!selectedCompany || !scheduleDate || !scheduleTime || selectedStudentIds.length === 0 || !user) {
+      toast({ title: 'Missing information', description: 'Please fill all required fields', variant: 'destructive' });
+      return;
+    }
 
-    return groups;
+    setProcessingId('scheduling');
+
+    try {
+      const scheduledAt = new Date(`${scheduleDate}T${scheduleTime}`).toISOString();
+
+      // Create interview schedules for all selected students
+      for (const appId of selectedStudentIds) {
+        const student = selectedCompany.students.find(s => s.application_id === appId);
+        if (!student) continue;
+
+        // Insert interview schedule
+        const { error: insertError } = await supabase
+          .from('interview_schedules')
+          .insert({
+            application_id: appId,
+            scheduled_at: scheduledAt,
+            duration_minutes: parseInt(duration),
+            meeting_link: meetingLink || null,
+            notes: notes || null,
+            scheduled_by: user.id,
+            interview_status: 'scheduled',
+          });
+
+        if (insertError) throw insertError;
+
+        // Notify student
+        await supabase.from('notifications').insert({
+          user_id: student.student_id,
+          title: 'Interview Scheduled',
+          message: `Your interview for ${student.job_title} at ${student.company_name} is scheduled for ${format(new Date(scheduledAt), 'PPp')}${meetingLink ? '. Meeting link: ' + meetingLink : ''}`,
+          link: '/student/schedule',
+        });
+
+        // Notify recruiter
+        await supabase.from('notifications').insert({
+          user_id: student.recruiter_id,
+          title: 'Interview Scheduled',
+          message: `Interview scheduled with ${student.full_name} for ${student.job_title} on ${format(new Date(scheduledAt), 'PPp')}`,
+          link: '/recruiter/interviews',
+        });
+
+        // Notify mentor if exists
+        if (student.mentor_id) {
+          await supabase.from('notifications').insert({
+            user_id: student.mentor_id,
+            title: 'Student Interview Scheduled',
+            message: `Your mentee ${student.full_name} has an interview scheduled for ${student.job_title} at ${student.company_name} on ${format(new Date(scheduledAt), 'PPp')}`,
+            link: '/faculty/students',
+          });
+        }
+      }
+
+      toast({ title: 'Success', description: `Interview scheduled for ${selectedStudentIds.length} student(s)` });
+      setShowScheduleDialog(false);
+      fetchData();
+    } catch (error: any) {
+      console.error('Error scheduling interview:', error);
+      toast({ title: 'Error', description: error.message || 'Failed to schedule interview', variant: 'destructive' });
+    } finally {
+      setProcessingId(null);
+    }
   };
 
-  const upcomingInterviews = interviews.filter(i => 
-    i.interview_status === 'scheduled' && new Date(i.scheduled_at) >= new Date()
-  );
-  const pastInterviews = interviews.filter(i => 
-    i.interview_status !== 'scheduled' || new Date(i.scheduled_at) < new Date()
-  );
+  const handleUpdateStatus = async (interview: Interview, status: string) => {
+    setProcessingId(interview.id);
 
-  const companyGroups = groupInterviewsByCompany();
-  const eligibleByCompany = groupEligibleByCompany();
+    try {
+      const { error } = await supabase
+        .from('interview_schedules')
+        .update({ interview_status: status })
+        .eq('id', interview.id);
+
+      if (error) throw error;
+
+      // If completed, update application status to selected
+      if (status === 'completed' && interview.application) {
+        await supabase
+          .from('applications')
+          .update({ status: 'selected' })
+          .eq('id', interview.application_id);
+
+        // Notify student
+        await supabase.from('notifications').insert({
+          user_id: interview.application.student_id,
+          title: 'Congratulations!',
+          message: `You have been selected for ${interview.application.job?.title} at ${interview.application.job?.company_name}!`,
+          link: '/student/applications',
+        });
+
+        // Notify recruiter
+        if (interview.application.job?.recruiter_id) {
+          await supabase.from('notifications').insert({
+            user_id: interview.application.job.recruiter_id,
+            title: 'Candidate Selected',
+            message: `${interview.application.student_profile?.full_name} has been marked as selected for ${interview.application.job.title}`,
+            link: '/recruiter/candidates',
+          });
+        }
+
+        // Notify mentor
+        if (interview.application.mentor_id) {
+          await supabase.from('notifications').insert({
+            user_id: interview.application.mentor_id,
+            title: 'Mentee Selected!',
+            message: `Your mentee ${interview.application.student_profile?.full_name} has been selected for ${interview.application.job?.title} at ${interview.application.job?.company_name}!`,
+            link: '/faculty/students',
+          });
+        }
+      }
+
+      toast({ title: 'Success', description: `Interview marked as ${status}` });
+      fetchData();
+    } catch (error: any) {
+      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
+  const getStatusBadge = (status: string | null) => {
+    switch (status) {
+      case 'scheduled':
+        return <Badge className="bg-blue-100 text-blue-700">Scheduled</Badge>;
+      case 'completed':
+        return <Badge className="bg-green-100 text-green-700">Completed</Badge>;
+      case 'cancelled':
+        return <Badge className="bg-red-100 text-red-700">Cancelled</Badge>;
+      default:
+        return <Badge variant="secondary">Unknown</Badge>;
+    }
+  };
+
+  const totalAwaitingSchedule = companyGroups.reduce((acc, g) => acc + g.students.length, 0);
+  const totalScheduled = companyGroups.reduce((acc, g) => acc + g.interviews.filter(i => i.interview_status === 'scheduled').length, 0);
+  const totalCompleted = companyGroups.reduce((acc, g) => acc + g.interviews.filter(i => i.interview_status === 'completed').length, 0);
 
   if (isLoading) {
     return (
@@ -432,19 +402,13 @@ const PlacementInterviews: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      {/* Header */}
       <motion.div 
         initial={{ opacity: 0, y: -20 }} 
         animate={{ opacity: 1, y: 0 }}
-        className="flex justify-between items-start"
       >
-        <div>
-          <h1 className="text-3xl font-heading font-bold text-foreground">Interview Scheduling</h1>
-          <p className="text-muted-foreground mt-1">Schedule and manage interviews grouped by company</p>
-        </div>
-        <Button onClick={() => setShowScheduleDialog(true)} className="gradient-primary">
-          <Plus className="w-4 h-4 mr-2" />
-          Schedule Interview
-        </Button>
+        <h1 className="text-3xl font-heading font-bold text-foreground">Interview Management</h1>
+        <p className="text-muted-foreground mt-1">Schedule and manage interviews by company</p>
       </motion.div>
 
       {/* Stats */}
@@ -452,282 +416,264 @@ const PlacementInterviews: React.FC = () => {
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.1 }}
-        className="grid grid-cols-1 md:grid-cols-4 gap-4"
+        className="grid grid-cols-2 md:grid-cols-4 gap-4"
       >
         <Card variant="glass">
           <CardContent className="pt-4 text-center">
-            <Building2 className="w-8 h-8 text-primary mx-auto mb-2" />
-            <p className="text-3xl font-bold text-foreground">{companyGroups.length}</p>
+            <Building2 className="w-6 h-6 text-primary mx-auto mb-2" />
+            <p className="text-2xl font-bold">{companyGroups.length}</p>
             <p className="text-sm text-muted-foreground">Companies</p>
           </CardContent>
         </Card>
         <Card variant="glass">
           <CardContent className="pt-4 text-center">
-            <Calendar className="w-8 h-8 text-blue-500 mx-auto mb-2" />
-            <p className="text-3xl font-bold text-foreground">{upcomingInterviews.length}</p>
-            <p className="text-sm text-muted-foreground">Upcoming</p>
-          </CardContent>
-        </Card>
-        <Card variant="glass">
-          <CardContent className="pt-4 text-center">
-            <CheckCircle className="w-8 h-8 text-green-500 mx-auto mb-2" />
-            <p className="text-3xl font-bold text-foreground">
-              {interviews.filter(i => i.interview_status === 'completed').length}
-            </p>
-            <p className="text-sm text-muted-foreground">Completed</p>
-          </CardContent>
-        </Card>
-        <Card variant="glass">
-          <CardContent className="pt-4 text-center">
-            <User className="w-8 h-8 text-accent mx-auto mb-2" />
-            <p className="text-3xl font-bold text-foreground">{eligibleApplications.length}</p>
+            <Users className="w-6 h-6 text-amber-500 mx-auto mb-2" />
+            <p className="text-2xl font-bold text-amber-600">{totalAwaitingSchedule}</p>
             <p className="text-sm text-muted-foreground">Awaiting Schedule</p>
           </CardContent>
         </Card>
-      </motion.div>
-
-      {/* Awaiting Schedule - By Company */}
-      {eligibleApplications.length > 0 && (
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.15 }}
-        >
-          <Card variant="elevated">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Users className="w-5 h-5 text-accent" />
-                Students Awaiting Interview Schedule
-              </CardTitle>
-              <CardDescription>
-                Students who passed assessments and are ready for interviews
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-3">
-                {Object.entries(eligibleByCompany).map(([companyName, apps]) => (
-                  <div key={companyName} className="p-4 bg-accent/5 rounded-lg border border-accent/20">
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-lg bg-accent/10 flex items-center justify-center">
-                          <Building2 className="w-5 h-5 text-accent" />
-                        </div>
-                        <div>
-                          <p className="font-semibold">{companyName}</p>
-                          <p className="text-sm text-muted-foreground">{apps[0]?.job?.title}</p>
-                        </div>
-                      </div>
-                      <Badge variant="secondary">{apps.length} student(s)</Badge>
-                    </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
-                      {apps.map(app => (
-                        <div key={app.id} className="flex items-center gap-2 p-2 bg-background rounded border">
-                          <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-xs font-semibold text-primary">
-                            {app.student_profile?.full_name?.split(' ').map(n => n[0]).join('') || '?'}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium truncate">{app.student_profile?.full_name}</p>
-                            <p className="text-xs text-muted-foreground truncate">{app.student_profile?.email}</p>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        </motion.div>
-      )}
-
-      {/* Scheduled Interviews - By Company */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.2 }}
-      >
-        <Card variant="elevated">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Calendar className="w-5 h-5 text-blue-500" />
-              Interviews by Company
-            </CardTitle>
-            <CardDescription>All scheduled and past interviews organized by company</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {companyGroups.length === 0 ? (
-              <div className="py-8 text-center">
-                <Calendar className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
-                <p className="text-muted-foreground">No interviews scheduled yet</p>
-                <p className="text-sm text-muted-foreground mt-1">
-                  Add students to interview list from the Candidates section
-                </p>
-              </div>
-            ) : (
-              companyGroups.map((group, index) => {
-                const isExpanded = expandedCompanies.has(group.job_id);
-                const scheduledCount = group.interviews.filter(i => i.interview_status === 'scheduled').length;
-                const completedCount = group.interviews.filter(i => i.interview_status === 'completed').length;
-
-                return (
-                  <motion.div
-                    key={group.job_id}
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: index * 0.05 }}
-                  >
-                    <div className="border rounded-lg overflow-hidden">
-                      <div 
-                        className="flex items-center justify-between p-4 bg-muted/30 cursor-pointer hover:bg-muted/50 transition-colors"
-                        onClick={() => toggleCompanyExpand(group.job_id)}
-                      >
-                        <div className="flex items-center gap-4">
-                          <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center">
-                            <Building2 className="w-6 h-6 text-primary" />
-                          </div>
-                          <div>
-                            <p className="font-semibold text-foreground">{group.company_name}</p>
-                            <p className="text-sm text-muted-foreground">{group.job_title}</p>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-3">
-                          <Badge className="bg-blue-100 text-blue-700">
-                            {scheduledCount} Scheduled
-                          </Badge>
-                          <Badge className="bg-green-100 text-green-700">
-                            {completedCount} Completed
-                          </Badge>
-                          <Badge variant="secondary">
-                            {group.interviews.length} Total
-                          </Badge>
-                          {isExpanded ? (
-                            <ChevronUp className="w-5 h-5 text-muted-foreground" />
-                          ) : (
-                            <ChevronDown className="w-5 h-5 text-muted-foreground" />
-                          )}
-                        </div>
-                      </div>
-
-                      <AnimatePresence>
-                        {isExpanded && (
-                          <motion.div
-                            initial={{ height: 0, opacity: 0 }}
-                            animate={{ height: 'auto', opacity: 1 }}
-                            exit={{ height: 0, opacity: 0 }}
-                            transition={{ duration: 0.2 }}
-                          >
-                            <div className="p-4 border-t space-y-3">
-                              {group.interviews.map((interview) => (
-                                <div
-                                  key={interview.id}
-                                  className="flex items-center justify-between p-4 bg-background rounded-lg border"
-                                >
-                                  <div className="flex items-center gap-4">
-                                    <div className="w-10 h-10 rounded-full gradient-primary flex items-center justify-center text-primary-foreground font-semibold text-sm">
-                                      {interview.application?.student_profile?.full_name?.split(' ').map(n => n[0]).join('') || '?'}
-                                    </div>
-                                    <div>
-                                      <p className="font-medium text-foreground">
-                                        {interview.application?.student_profile?.full_name || 'Unknown Student'}
-                                      </p>
-                                      <div className="flex items-center gap-4 mt-1 text-xs text-muted-foreground">
-                                        <span className="flex items-center gap-1">
-                                          <Calendar className="w-3 h-3" />
-                                          {format(new Date(interview.scheduled_at), 'MMM dd, yyyy')}
-                                        </span>
-                                        <span className="flex items-center gap-1">
-                                          <Clock className="w-3 h-3" />
-                                          {format(new Date(interview.scheduled_at), 'h:mm a')}
-                                        </span>
-                                        {interview.meeting_link && (
-                                          <a 
-                                            href={interview.meeting_link} 
-                                            target="_blank" 
-                                            rel="noopener noreferrer"
-                                            className="flex items-center gap-1 text-primary hover:underline"
-                                            onClick={(e) => e.stopPropagation()}
-                                          >
-                                            <Link2 className="w-3 h-3" />
-                                            Join Meeting
-                                          </a>
-                                        )}
-                                      </div>
-                                    </div>
-                                  </div>
-                                  <div className="flex items-center gap-3">
-                                    {getStatusBadge(interview.interview_status)}
-                                    {interview.interview_status === 'scheduled' && (
-                                      <div className="flex gap-2">
-                                        <Button 
-                                          size="sm" 
-                                          variant="accent"
-                                          disabled={processingId === interview.id}
-                                          onClick={() => handleUpdateStatus(interview.id, 'completed')}
-                                        >
-                                          {processingId === interview.id ? (
-                                            <Loader2 className="w-4 h-4 animate-spin" />
-                                          ) : (
-                                            <>
-                                              <CheckCircle className="w-4 h-4 mr-1" />
-                                              Mark Done
-                                            </>
-                                          )}
-                                        </Button>
-                                        <Button 
-                                          size="sm" 
-                                          variant="outline"
-                                          className="text-red-500"
-                                          disabled={processingId === interview.id}
-                                          onClick={() => handleUpdateStatus(interview.id, 'cancelled')}
-                                        >
-                                          <XCircle className="w-4 h-4" />
-                                        </Button>
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
-                    </div>
-                  </motion.div>
-                );
-              })
-            )}
+        <Card variant="glass">
+          <CardContent className="pt-4 text-center">
+            <Calendar className="w-6 h-6 text-blue-500 mx-auto mb-2" />
+            <p className="text-2xl font-bold text-blue-600">{totalScheduled}</p>
+            <p className="text-sm text-muted-foreground">Scheduled</p>
+          </CardContent>
+        </Card>
+        <Card variant="glass">
+          <CardContent className="pt-4 text-center">
+            <CheckCircle className="w-6 h-6 text-green-500 mx-auto mb-2" />
+            <p className="text-2xl font-bold text-green-600">{totalCompleted}</p>
+            <p className="text-sm text-muted-foreground">Completed</p>
           </CardContent>
         </Card>
       </motion.div>
 
+      {/* Company Groups */}
+      {companyGroups.length === 0 ? (
+        <Card variant="elevated">
+          <CardContent className="py-12 text-center">
+            <Building2 className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
+            <p className="text-lg font-medium text-muted-foreground">No interviews to schedule</p>
+            <p className="text-sm text-muted-foreground mt-1">
+              Add students to interview list from the Candidates section first
+            </p>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="space-y-4">
+          {companyGroups.map((group, index) => {
+            const isExpanded = expandedCompanies.has(group.job_id);
+            const scheduledCount = group.interviews.filter(i => i.interview_status === 'scheduled').length;
+            const completedCount = group.interviews.filter(i => i.interview_status === 'completed').length;
+
+            return (
+              <motion.div
+                key={group.job_id}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: index * 0.05 }}
+              >
+                <Card variant="elevated" className="overflow-hidden">
+                  {/* Company Header */}
+                  <div 
+                    className="flex items-center justify-between p-4 cursor-pointer hover:bg-muted/50 transition-colors"
+                    onClick={() => toggleCompanyExpand(group.job_id)}
+                  >
+                    <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center">
+                        <Building2 className="w-6 h-6 text-primary" />
+                      </div>
+                      <div>
+                        <p className="font-semibold text-lg text-foreground">{group.company_name}</p>
+                        <p className="text-sm text-muted-foreground">{group.job_title}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      {group.students.length > 0 && (
+                        <Badge className="bg-amber-100 text-amber-700">
+                          {group.students.length} Awaiting
+                        </Badge>
+                      )}
+                      {scheduledCount > 0 && (
+                        <Badge className="bg-blue-100 text-blue-700">
+                          {scheduledCount} Scheduled
+                        </Badge>
+                      )}
+                      {completedCount > 0 && (
+                        <Badge className="bg-green-100 text-green-700">
+                          {completedCount} Completed
+                        </Badge>
+                      )}
+                      {isExpanded ? (
+                        <ChevronUp className="w-5 h-5 text-muted-foreground" />
+                      ) : (
+                        <ChevronDown className="w-5 h-5 text-muted-foreground" />
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Expanded Content */}
+                  <AnimatePresence>
+                    {isExpanded && (
+                      <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        transition={{ duration: 0.2 }}
+                      >
+                        <div className="border-t p-4 space-y-4">
+                          {/* Awaiting Schedule */}
+                          {group.students.length > 0 && (
+                            <div className="space-y-3">
+                              <div className="flex items-center justify-between">
+                                <p className="font-medium text-amber-700 flex items-center gap-2">
+                                  <Clock className="w-4 h-4" />
+                                  Awaiting Schedule ({group.students.length})
+                                </p>
+                                <Button size="sm" onClick={() => openScheduleDialog(group)}>
+                                  <Calendar className="w-4 h-4 mr-1" />
+                                  Schedule Interview
+                                </Button>
+                              </div>
+                              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                                {group.students.map(student => (
+                                  <div key={student.application_id} className="flex items-center gap-2 p-2 bg-amber-50 rounded-lg border border-amber-100">
+                                    <div className="w-8 h-8 rounded-full bg-amber-100 flex items-center justify-center text-xs font-semibold text-amber-700">
+                                      {student.full_name.split(' ').map(n => n[0]).join('')}
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                      <p className="text-sm font-medium truncate">{student.full_name}</p>
+                                      <p className="text-xs text-muted-foreground truncate">{student.email}</p>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Scheduled Interviews */}
+                          {group.interviews.length > 0 && (
+                            <div className="space-y-3">
+                              <p className="font-medium text-blue-700 flex items-center gap-2">
+                                <Calendar className="w-4 h-4" />
+                                Interviews ({group.interviews.length})
+                              </p>
+                              <div className="space-y-2">
+                                {group.interviews.map(interview => (
+                                  <div key={interview.id} className="flex items-center justify-between p-3 bg-muted/50 rounded-lg border">
+                                    <div className="flex items-center gap-3">
+                                      <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-sm font-semibold text-primary">
+                                        {interview.application?.student_profile?.full_name?.split(' ').map(n => n[0]).join('') || '?'}
+                                      </div>
+                                      <div>
+                                        <p className="font-medium">{interview.application?.student_profile?.full_name || 'Unknown'}</p>
+                                        <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                                          <span className="flex items-center gap-1">
+                                            <Calendar className="w-3 h-3" />
+                                            {format(new Date(interview.scheduled_at), 'MMM dd, yyyy')}
+                                          </span>
+                                          <span className="flex items-center gap-1">
+                                            <Clock className="w-3 h-3" />
+                                            {format(new Date(interview.scheduled_at), 'h:mm a')}
+                                          </span>
+                                          {interview.meeting_link && (
+                                            <a 
+                                              href={interview.meeting_link} 
+                                              target="_blank" 
+                                              rel="noopener noreferrer"
+                                              className="flex items-center gap-1 text-primary hover:underline"
+                                              onClick={(e) => e.stopPropagation()}
+                                            >
+                                              <Link2 className="w-3 h-3" />
+                                              Join
+                                            </a>
+                                          )}
+                                        </div>
+                                      </div>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                      {getStatusBadge(interview.interview_status)}
+                                      {interview.interview_status === 'scheduled' && (
+                                        <div className="flex gap-1">
+                                          <Button 
+                                            size="sm" 
+                                            variant="outline"
+                                            className="text-green-600 border-green-200 hover:bg-green-50"
+                                            disabled={processingId === interview.id}
+                                            onClick={() => handleUpdateStatus(interview, 'completed')}
+                                          >
+                                            {processingId === interview.id ? (
+                                              <Loader2 className="w-4 h-4 animate-spin" />
+                                            ) : (
+                                              <CheckCircle className="w-4 h-4" />
+                                            )}
+                                          </Button>
+                                          <Button 
+                                            size="sm" 
+                                            variant="outline"
+                                            className="text-red-600 border-red-200 hover:bg-red-50"
+                                            disabled={processingId === interview.id}
+                                            onClick={() => handleUpdateStatus(interview, 'cancelled')}
+                                          >
+                                            <XCircle className="w-4 h-4" />
+                                          </Button>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </Card>
+              </motion.div>
+            );
+          })}
+        </div>
+      )}
+
       {/* Schedule Interview Dialog */}
       <Dialog open={showScheduleDialog} onOpenChange={setShowScheduleDialog}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>Schedule New Interview</DialogTitle>
+            <DialogTitle>Schedule Interview</DialogTitle>
             <DialogDescription>
-              Select a student and set the interview details
+              {selectedCompany?.company_name} - {selectedCompany?.job_title}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
+            {/* Student Selection */}
             <div className="space-y-2">
-              <Label>Select Student Application</Label>
-              <Select value={selectedApplication} onValueChange={setSelectedApplication}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select a student..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {eligibleApplications.map((app) => (
-                    <SelectItem key={app.id} value={app.id}>
-                      {app.student_profile?.full_name || 'Unknown'} - {app.job?.title} ({app.job?.company_name})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Label>Select Students ({selectedStudentIds.length} selected)</Label>
+              <div className="max-h-40 overflow-y-auto border rounded-lg p-2 space-y-1">
+                {selectedCompany?.students.map(student => (
+                  <label key={student.application_id} className="flex items-center gap-2 p-2 hover:bg-muted rounded cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={selectedStudentIds.includes(student.application_id)}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setSelectedStudentIds([...selectedStudentIds, student.application_id]);
+                        } else {
+                          setSelectedStudentIds(selectedStudentIds.filter(id => id !== student.application_id));
+                        }
+                      }}
+                      className="rounded border-gray-300"
+                    />
+                    <span className="text-sm">{student.full_name}</span>
+                    <span className="text-xs text-muted-foreground">({student.email})</span>
+                  </label>
+                ))}
+              </div>
             </div>
+
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label>Date</Label>
+                <Label>Date *</Label>
                 <Input 
                   type="date" 
                   value={scheduleDate}
@@ -736,7 +682,7 @@ const PlacementInterviews: React.FC = () => {
                 />
               </div>
               <div className="space-y-2">
-                <Label>Time</Label>
+                <Label>Time *</Label>
                 <Input 
                   type="time" 
                   value={scheduleTime}
@@ -744,8 +690,9 @@ const PlacementInterviews: React.FC = () => {
                 />
               </div>
             </div>
+
             <div className="space-y-2">
-              <Label>Duration (minutes)</Label>
+              <Label>Duration</Label>
               <Select value={duration} onValueChange={setDuration}>
                 <SelectTrigger>
                   <SelectValue />
@@ -758,8 +705,9 @@ const PlacementInterviews: React.FC = () => {
                 </SelectContent>
               </Select>
             </div>
+
             <div className="space-y-2">
-              <Label>Meeting Link (optional)</Label>
+              <Label>Meeting Link</Label>
               <Input 
                 type="url" 
                 placeholder="https://meet.google.com/..."
@@ -767,26 +715,37 @@ const PlacementInterviews: React.FC = () => {
                 onChange={(e) => setMeetingLink(e.target.value)}
               />
             </div>
-            <div className="flex justify-end gap-2 pt-4">
-              <Button variant="outline" onClick={() => setShowScheduleDialog(false)}>
-                Cancel
-              </Button>
-              <Button 
-                className="gradient-primary"
-                onClick={handleScheduleInterview}
-                disabled={processingId === 'scheduling'}
-              >
-                {processingId === 'scheduling' ? (
-                  <><Loader2 className="w-4 h-4 animate-spin mr-2" /> Scheduling...</>
-                ) : (
-                  <>
-                    <Calendar className="w-4 h-4 mr-2" />
-                    Schedule Interview
-                  </>
-                )}
-              </Button>
+
+            <div className="space-y-2">
+              <Label>Notes (optional)</Label>
+              <Textarea
+                placeholder="Any additional instructions..."
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                rows={2}
+              />
             </div>
+
+            <p className="text-xs text-muted-foreground">
+              Notifications will be sent to selected students, the recruiter, and their mentors.
+            </p>
           </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowScheduleDialog(false)}>Cancel</Button>
+            <Button 
+              onClick={handleScheduleInterview}
+              disabled={processingId === 'scheduling' || selectedStudentIds.length === 0}
+            >
+              {processingId === 'scheduling' ? (
+                <><Loader2 className="w-4 h-4 animate-spin mr-2" /> Scheduling...</>
+              ) : (
+                <>
+                  <Calendar className="w-4 h-4 mr-2" />
+                  Schedule ({selectedStudentIds.length})
+                </>
+              )}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
