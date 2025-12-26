@@ -58,15 +58,11 @@ const PlacementPlacedCandidates: React.FC = () => {
 
   const fetchPlacedCandidates = async () => {
     try {
-      // Fetch selected applications (completed interviews > 24 hours ago)
-      const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-      
-      // Get applications with 'selected' status
+      // Get applications with 'selected' status (immediately, no delay)
       const { data: applications, error } = await supabase
         .from('applications')
         .select('id, student_id, job_id, updated_at, status')
         .eq('status', 'selected')
-        .lt('updated_at', twentyFourHoursAgo)
         .order('updated_at', { ascending: false });
 
       if (error) throw error;
