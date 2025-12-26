@@ -45,16 +45,20 @@ export const useMentor = (userId?: string, userRole?: string) => {
   // Fetch mentor request for student
   const fetchMentorRequest = async () => {
     if (!userId) return;
-    
+
     try {
+      // Use order+limit to avoid "Cannot coerce the result to a single JSON object"
+      // in case legacy duplicate rows exist for a student.
       const { data, error } = await supabase
         .from('mentor_requests')
         .select('*')
         .eq('student_id', userId)
+        .order('created_at', { ascending: false })
+        .limit(1)
         .maybeSingle();
 
       if (error) throw error;
-      setMentorRequest(data as MentorRequest | null);
+      setMentorRequest((data as MentorRequest | null) ?? null);
     } catch (error) {
       console.error('Error fetching mentor request:', error);
     }
@@ -190,17 +194,21 @@ export const useMentor = (userId?: string, userRole?: string) => {
     if (!userId) return { error: 'Not authenticated' };
 
     try {
-      // First check if there's an existing rejected request
-      const { data: existingRequest } = await supabase
+      // Find the latest request for this student (defensive against legacy duplicates)
+      const { data: latestRequest, error: latestErr } = await supabase
         .from('mentor_requests')
         .select('id, status')
         .eq('student_id', userId)
+        .order('created_at', { ascending: false })
+        .limit(1)
         .maybeSingle();
 
-      let data;
-      let error;
+      if (latestErr) throw latestErr;
 
-      if (existingRequest && existingRequest.status === 'rejected') {
+      let data: any;
+      let error: any;
+
+      if (latestRequest && latestRequest.status === 'rejected') {
         // Update the existing rejected request with new mentor
         const result = await supabase
           .from('mentor_requests')
@@ -210,13 +218,13 @@ export const useMentor = (userId?: string, userRole?: string) => {
             status: 'pending',
             updated_at: new Date().toISOString(),
           })
-          .eq('id', existingRequest.id)
+          .eq('id', latestRequest.id)
           .select()
           .single();
-        
+
         data = result.data;
         error = result.error;
-      } else if (!existingRequest) {
+      } else if (!latestRequest) {
         // No existing request, create a new one
         const result = await supabase
           .from('mentor_requests')
@@ -228,7 +236,7 @@ export const useMentor = (userId?: string, userRole?: string) => {
           })
           .select()
           .single();
-        
+
         data = result.data;
         error = result.error;
       } else {
