@@ -21,9 +21,11 @@ import {
   Rocket,
   Code,
   UserCheck,
+  LogOut,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { toast } from 'sonner';
 
 type AppRole = Database['public']['Enums']['app_role'];
 
@@ -77,10 +79,16 @@ const roleNavItems: Record<AppRole, NavItem[]> = {
 };
 
 const DashboardSidebar: React.FC = () => {
-  const { role } = useSupabaseAuthContext();
+  const { role, signOut } = useSupabaseAuthContext();
   const navigate = useNavigate();
   const location = useLocation();
   const [isCollapsed, setIsCollapsed] = useState(false);
+
+  const handleLogout = async () => {
+    await signOut();
+    toast.success('Logged out successfully');
+    navigate('/');
+  };
 
   if (!role) return null;
 
@@ -156,6 +164,30 @@ const DashboardSidebar: React.FC = () => {
           );
         })}
       </nav>
+
+      {/* Logout button */}
+      <div className="p-3 border-t border-sidebar-border">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={handleLogout}
+          className="w-full justify-start text-red-400 hover:text-red-300 hover:bg-red-500/10"
+        >
+          <LogOut className="w-5 h-5 flex-shrink-0" />
+          <AnimatePresence>
+            {!isCollapsed && (
+              <motion.span
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="ml-3"
+              >
+                Logout
+              </motion.span>
+            )}
+          </AnimatePresence>
+        </Button>
+      </div>
 
       {/* Collapse button */}
       <div className="p-3 border-t border-sidebar-border">
