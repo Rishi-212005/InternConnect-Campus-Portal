@@ -124,12 +124,12 @@ const PlacementCompanyRounds: React.FC = () => {
       }
       setAssessment(currentAssessment);
 
-      // Get faculty-approved applications for this job
+      // Get applications for this job (exclude rejected ones)
       const { data: applications } = await supabase
         .from('applications')
         .select('id, student_id, status')
         .eq('job_id', jobId)
-        .in('status', ['faculty_approved', 'shortlisted', 'interview', 'selected']);
+        .in('status', ['faculty_approved', 'shortlisted']);
 
       if (!applications || applications.length === 0) {
         setIsLoading(false);
@@ -188,11 +188,6 @@ const PlacementCompanyRounds: React.FC = () => {
             .maybeSingle();
 
           const attempt = attemptsMap.get(app.student_id);
-          
-          // Skip students who have already been added to interview list or selected
-          if (app.status === 'interview' || app.status === 'selected') {
-            return;
-          }
           
           let currentStatus: 'pending' | 'passed' | 'failed' = 'pending';
           
