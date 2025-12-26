@@ -20,6 +20,7 @@ import {
   Share2,
   Edit,
   GraduationCap,
+  Eye,
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -30,6 +31,7 @@ import { Progress } from '@/components/ui/progress';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { useSupabaseAuthContext } from '@/contexts/SupabaseAuthContext';
 import { useProfile } from '@/hooks/useProfile';
+import { supabase } from '@/integrations/supabase/client';
 
 const StudentProfile: React.FC = () => {
   const { user } = useSupabaseAuthContext();
@@ -117,6 +119,23 @@ const StudentProfile: React.FC = () => {
     const file = e.target.files?.[0];
     if (file) {
       await uploadResume(file);
+    }
+  };
+
+  const handleViewResume = async () => {
+    if (!studentProfile?.resume_url) return;
+    
+    try {
+      const { data, error } = await supabase.storage
+        .from('resumes')
+        .createSignedUrl(studentProfile.resume_url, 3600);
+      
+      if (error) throw error;
+      if (data?.signedUrl) {
+        window.open(data.signedUrl, '_blank');
+      }
+    } catch (error) {
+      console.error('Error viewing resume:', error);
     }
   };
 
@@ -284,15 +303,26 @@ const StudentProfile: React.FC = () => {
                 <p className="text-sm text-muted-foreground mt-2">
                   {studentProfile?.resume_url ? 'Resume uploaded ✓' : 'Upload your resume'}
                 </p>
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  className="mt-2"
-                  onClick={() => resumeInputRef.current?.click()}
-                >
-                  <Upload className="w-4 h-4 mr-2" />
-                  {studentProfile?.resume_url ? 'Update' : 'Upload'}
-                </Button>
+                <div className="flex gap-2 justify-center mt-2">
+                  {studentProfile?.resume_url && (
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      onClick={handleViewResume}
+                    >
+                      <Eye className="w-4 h-4 mr-2" />
+                      View
+                    </Button>
+                  )}
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={() => resumeInputRef.current?.click()}
+                  >
+                    <Upload className="w-4 h-4 mr-2" />
+                    {studentProfile?.resume_url ? 'Update' : 'Upload'}
+                  </Button>
+                </div>
                 <input
                   ref={resumeInputRef}
                   type="file"
