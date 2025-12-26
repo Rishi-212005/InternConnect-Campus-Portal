@@ -343,11 +343,9 @@ const RecruiterInterviews: React.FC = () => {
           ? 'Candidate marked as selected!' 
           : 'Candidate marked as rejected'
       });
-      
-      // Refresh to ensure sync with database
-      fetchInterviews();
+      // Don't call fetchInterviews here - we already removed the interview from state
     } catch (error: any) {
-      // Revert local state on error
+      // Revert local state on error by refetching
       fetchInterviews();
       toast({ title: 'Error', description: error.message, variant: 'destructive' });
     }
