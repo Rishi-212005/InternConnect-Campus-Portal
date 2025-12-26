@@ -220,7 +220,7 @@ export const useMentor = (userId?: string, userRole?: string) => {
           })
           .eq('id', latestRequest.id)
           .select()
-          .single();
+          .maybeSingle();
 
         data = result.data;
         error = result.error;
@@ -235,7 +235,7 @@ export const useMentor = (userId?: string, userRole?: string) => {
             status: 'pending',
           })
           .select()
-          .single();
+          .maybeSingle();
 
         data = result.data;
         error = result.error;
@@ -246,7 +246,14 @@ export const useMentor = (userId?: string, userRole?: string) => {
 
       if (error) throw error;
 
-      setMentorRequest(data as MentorRequest);
+      // Some RLS configurations can allow the write but not return the row representation.
+      // Fall back to refetching the latest request.
+      if (!data) {
+        await fetchMentorRequest();
+      } else {
+        setMentorRequest(data as MentorRequest);
+      }
+
       toast({
         title: 'Request Sent',
         description: 'Your mentor request has been sent successfully.',
