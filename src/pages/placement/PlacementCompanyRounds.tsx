@@ -102,12 +102,12 @@ const PlacementCompanyRounds: React.FC = () => {
         setJobInfo(job);
       }
 
-      // Get first assessment for this job (single round)
+      // Get latest assessment for this job (single round - use the most recent one)
       const { data: assessments } = await supabase
         .from('assessments')
         .select('id, title, status, passing_score')
         .eq('job_id', jobId)
-        .order('created_at', { ascending: true })
+        .order('created_at', { ascending: false })
         .limit(1);
 
       const currentAssessment = assessments?.[0] || null;
