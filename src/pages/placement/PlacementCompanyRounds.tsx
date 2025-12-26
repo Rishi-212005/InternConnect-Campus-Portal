@@ -400,6 +400,43 @@ const PlacementCompanyRounds: React.FC = () => {
     }
   };
 
+  // Notify all failed students
+  const handleNotifyAllFailed = async () => {
+    const filteredStudents = getFilteredFailedStudents();
+    if (filteredStudents.length === 0) {
+      toast({ title: 'No students', description: 'No failed students to notify', variant: 'destructive' });
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const defaultMessage = 'Unfortunately, you did not meet the minimum requirements for this round. We wish you the best in your future endeavors.';
+      
+      for (const student of filteredStudents) {
+        // Update application status to rejected
+        await supabase
+          .from('applications')
+          .update({ status: 'rejected' })
+          .eq('id', student.application_id);
+
+        // Send notification
+        await supabase.from('notifications').insert({
+          user_id: student.student_id,
+          title: 'Assessment Result',
+          message: defaultMessage,
+          link: '/student/applications',
+        });
+      }
+
+      toast({ title: 'Success', description: `${filteredStudents.length} student(s) notified and status updated` });
+      fetchJobData();
+    } catch (error: any) {
+      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   // Filter students based on selected filter
   const getFilteredStudents = () => {
     if (filter === 'passed') return allPassedStudents;
@@ -672,19 +709,30 @@ const PlacementCompanyRounds: React.FC = () => {
                     </CardTitle>
                     <CardDescription>Students who did not meet the minimum requirements</CardDescription>
                   </div>
-                  <Select value={roundFilter} onValueChange={setRoundFilter}>
-                    <SelectTrigger className="w-[180px]">
-                      <SelectValue placeholder="Filter by round" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Rounds</SelectItem>
-                      {rounds.map((round, index) => (
-                        <SelectItem key={round.assessment.id} value={round.assessment.title}>
-                          Round {index + 1}: {round.assessment.title}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <div className="flex items-center gap-2">
+                    <Select value={roundFilter} onValueChange={setRoundFilter}>
+                      <SelectTrigger className="w-[180px]">
+                        <SelectValue placeholder="Filter by round" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Rounds</SelectItem>
+                        {rounds.map((round, index) => (
+                          <SelectItem key={round.assessment.id} value={round.assessment.title}>
+                            Round {index + 1}: {round.assessment.title}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      onClick={handleNotifyAllFailed}
+                      disabled={isSubmitting || getFilteredFailedStudents().length === 0}
+                    >
+                      {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Send className="w-4 h-4 mr-1" />}
+                      Notify All Failed
+                    </Button>
+                  </div>
                 </div>
               </CardHeader>
               <CardContent>

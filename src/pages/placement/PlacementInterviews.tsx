@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -16,7 +16,10 @@ import {
   Building2,
   CheckCircle,
   XCircle,
-  Link2
+  Link2,
+  ChevronDown,
+  ChevronUp,
+  Users
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useSupabaseAuthContext } from '@/contexts/SupabaseAuthContext';
@@ -64,6 +67,13 @@ interface EligibleApplication {
   };
 }
 
+interface CompanyInterviewGroup {
+  company_name: string;
+  job_title: string;
+  job_id: string;
+  interviews: Interview[];
+}
+
 const PlacementInterviews: React.FC = () => {
   const { user } = useSupabaseAuthContext();
   const { toast } = useToast();
@@ -72,6 +82,7 @@ const PlacementInterviews: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [showScheduleDialog, setShowScheduleDialog] = useState(false);
   const [processingId, setProcessingId] = useState<string | null>(null);
+  const [expandedCompanies, setExpandedCompanies] = useState<Set<string>>(new Set());
 
   // Schedule form
   const [selectedApplication, setSelectedApplication] = useState('');
@@ -133,11 +144,11 @@ const PlacementInterviews: React.FC = () => {
 
   const fetchEligibleApplications = async () => {
     try {
-      // Fetch applications that are shortlisted or faculty_approved
+      // Fetch applications that have interview status
       const { data: appData, error } = await supabase
         .from('applications')
         .select('id, student_id, job_id, status')
-        .in('status', ['shortlisted', 'faculty_approved', 'applied']);
+        .eq('status', 'interview');
 
       if (error) throw error;
 
@@ -214,12 +225,6 @@ const PlacementInterviews: React.FC = () => {
 
       if (insertError) throw insertError;
 
-      // Update application status to interview
-      await supabase
-        .from('applications')
-        .update({ status: 'interview' })
-        .eq('id', selectedApplication);
-
       // Get application details for email
       const app = eligibleApplications.find(a => a.id === selectedApplication);
       if (app?.student_profile?.email) {
@@ -236,6 +241,16 @@ const PlacementInterviews: React.FC = () => {
               meetingLink: meetingLink || undefined,
             },
           },
+        });
+      }
+
+      // Send in-app notification
+      if (app) {
+        await supabase.from('notifications').insert({
+          user_id: app.student_id,
+          title: 'Interview Scheduled',
+          message: `Your interview for ${app.job?.title} at ${app.job?.company_name} has been scheduled for ${format(new Date(scheduledAt), 'PPp')}`,
+          link: '/student/schedule',
         });
       }
 
@@ -295,6 +310,14 @@ const PlacementInterviews: React.FC = () => {
               },
             });
           }
+
+          // Send in-app notification
+          await supabase.from('notifications').insert({
+            user_id: interview.application.student_id,
+            title: 'Congratulations! You have been selected',
+            message: `You have been selected for the position of ${interview.application.job?.title} at ${interview.application.job?.company_name}!`,
+            link: '/student/applications',
+          });
         }
       }
 
@@ -339,12 +362,65 @@ const PlacementInterviews: React.FC = () => {
     }
   };
 
+  const toggleCompanyExpand = (jobId: string) => {
+    setExpandedCompanies(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(jobId)) {
+        newSet.delete(jobId);
+      } else {
+        newSet.add(jobId);
+      }
+      return newSet;
+    });
+  };
+
+  // Group interviews by company
+  const groupInterviewsByCompany = (): CompanyInterviewGroup[] => {
+    const groups: Record<string, CompanyInterviewGroup> = {};
+    
+    interviews.forEach(interview => {
+      if (!interview.application?.job) return;
+      
+      const key = interview.application.job_id;
+      if (!groups[key]) {
+        groups[key] = {
+          company_name: interview.application.job.company_name,
+          job_title: interview.application.job.title,
+          job_id: interview.application.job_id,
+          interviews: [],
+        };
+      }
+      groups[key].interviews.push(interview);
+    });
+
+    return Object.values(groups);
+  };
+
+  // Group eligible applications by company
+  const groupEligibleByCompany = () => {
+    const groups: Record<string, EligibleApplication[]> = {};
+    
+    eligibleApplications.forEach(app => {
+      if (!app.job) return;
+      const key = app.job.company_name;
+      if (!groups[key]) {
+        groups[key] = [];
+      }
+      groups[key].push(app);
+    });
+
+    return groups;
+  };
+
   const upcomingInterviews = interviews.filter(i => 
     i.interview_status === 'scheduled' && new Date(i.scheduled_at) >= new Date()
   );
   const pastInterviews = interviews.filter(i => 
     i.interview_status !== 'scheduled' || new Date(i.scheduled_at) < new Date()
   );
+
+  const companyGroups = groupInterviewsByCompany();
+  const eligibleByCompany = groupEligibleByCompany();
 
   if (isLoading) {
     return (
@@ -363,7 +439,7 @@ const PlacementInterviews: React.FC = () => {
       >
         <div>
           <h1 className="text-3xl font-heading font-bold text-foreground">Interview Scheduling</h1>
-          <p className="text-muted-foreground mt-1">Schedule and manage interviews for students</p>
+          <p className="text-muted-foreground mt-1">Schedule and manage interviews grouped by company</p>
         </div>
         <Button onClick={() => setShowScheduleDialog(true)} className="gradient-primary">
           <Plus className="w-4 h-4 mr-2" />
@@ -378,6 +454,13 @@ const PlacementInterviews: React.FC = () => {
         transition={{ delay: 0.1 }}
         className="grid grid-cols-1 md:grid-cols-4 gap-4"
       >
+        <Card variant="glass">
+          <CardContent className="pt-4 text-center">
+            <Building2 className="w-8 h-8 text-primary mx-auto mb-2" />
+            <p className="text-3xl font-bold text-foreground">{companyGroups.length}</p>
+            <p className="text-sm text-muted-foreground">Companies</p>
+          </CardContent>
+        </Card>
         <Card variant="glass">
           <CardContent className="pt-4 text-center">
             <Calendar className="w-8 h-8 text-blue-500 mx-auto mb-2" />
@@ -396,21 +479,68 @@ const PlacementInterviews: React.FC = () => {
         </Card>
         <Card variant="glass">
           <CardContent className="pt-4 text-center">
-            <User className="w-8 h-8 text-primary mx-auto mb-2" />
+            <User className="w-8 h-8 text-accent mx-auto mb-2" />
             <p className="text-3xl font-bold text-foreground">{eligibleApplications.length}</p>
-            <p className="text-sm text-muted-foreground">Eligible Students</p>
-          </CardContent>
-        </Card>
-        <Card variant="glass">
-          <CardContent className="pt-4 text-center">
-            <Video className="w-8 h-8 text-purple-500 mx-auto mb-2" />
-            <p className="text-3xl font-bold text-foreground">{interviews.length}</p>
-            <p className="text-sm text-muted-foreground">Total Interviews</p>
+            <p className="text-sm text-muted-foreground">Awaiting Schedule</p>
           </CardContent>
         </Card>
       </motion.div>
 
-      {/* Upcoming Interviews */}
+      {/* Awaiting Schedule - By Company */}
+      {eligibleApplications.length > 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.15 }}
+        >
+          <Card variant="elevated">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Users className="w-5 h-5 text-accent" />
+                Students Awaiting Interview Schedule
+              </CardTitle>
+              <CardDescription>
+                Students who passed assessments and are ready for interviews
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                {Object.entries(eligibleByCompany).map(([companyName, apps]) => (
+                  <div key={companyName} className="p-4 bg-accent/5 rounded-lg border border-accent/20">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-lg bg-accent/10 flex items-center justify-center">
+                          <Building2 className="w-5 h-5 text-accent" />
+                        </div>
+                        <div>
+                          <p className="font-semibold">{companyName}</p>
+                          <p className="text-sm text-muted-foreground">{apps[0]?.job?.title}</p>
+                        </div>
+                      </div>
+                      <Badge variant="secondary">{apps.length} student(s)</Badge>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                      {apps.map(app => (
+                        <div key={app.id} className="flex items-center gap-2 p-2 bg-background rounded border">
+                          <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-xs font-semibold text-primary">
+                            {app.student_profile?.full_name?.split(' ').map(n => n[0]).join('') || '?'}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium truncate">{app.student_profile?.full_name}</p>
+                            <p className="text-xs text-muted-foreground truncate">{app.student_profile?.email}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        </motion.div>
+      )}
+
+      {/* Scheduled Interviews - By Company */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -420,134 +550,155 @@ const PlacementInterviews: React.FC = () => {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Calendar className="w-5 h-5 text-blue-500" />
-              Upcoming Interviews
+              Interviews by Company
             </CardTitle>
+            <CardDescription>All scheduled and past interviews organized by company</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            {upcomingInterviews.length === 0 ? (
+            {companyGroups.length === 0 ? (
               <div className="py-8 text-center">
-                <p className="text-muted-foreground">No upcoming interviews scheduled</p>
+                <Calendar className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
+                <p className="text-muted-foreground">No interviews scheduled yet</p>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Add students to interview list from the Candidates section
+                </p>
               </div>
             ) : (
-              upcomingInterviews.map((interview, index) => (
-                <motion.div
-                  key={interview.id}
-                  initial={{ opacity: 0, x: -20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: 0.05 * index }}
-                  className="flex items-center justify-between p-4 bg-muted/30 rounded-lg hover:bg-muted/50 transition-colors"
-                >
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 rounded-full gradient-primary flex items-center justify-center text-primary-foreground font-semibold">
-                      {interview.application?.student_profile?.full_name?.split(' ').map(n => n[0]).join('') || '?'}
-                    </div>
-                    <div>
-                      <p className="font-semibold text-foreground">
-                        {interview.application?.student_profile?.full_name || 'Unknown Student'}
-                      </p>
-                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                        <Briefcase className="w-3 h-3" />
-                        {interview.application?.job?.title} at {interview.application?.job?.company_name}
+              companyGroups.map((group, index) => {
+                const isExpanded = expandedCompanies.has(group.job_id);
+                const scheduledCount = group.interviews.filter(i => i.interview_status === 'scheduled').length;
+                const completedCount = group.interviews.filter(i => i.interview_status === 'completed').length;
+
+                return (
+                  <motion.div
+                    key={group.job_id}
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: index * 0.05 }}
+                  >
+                    <div className="border rounded-lg overflow-hidden">
+                      <div 
+                        className="flex items-center justify-between p-4 bg-muted/30 cursor-pointer hover:bg-muted/50 transition-colors"
+                        onClick={() => toggleCompanyExpand(group.job_id)}
+                      >
+                        <div className="flex items-center gap-4">
+                          <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center">
+                            <Building2 className="w-6 h-6 text-primary" />
+                          </div>
+                          <div>
+                            <p className="font-semibold text-foreground">{group.company_name}</p>
+                            <p className="text-sm text-muted-foreground">{group.job_title}</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <Badge className="bg-blue-100 text-blue-700">
+                            {scheduledCount} Scheduled
+                          </Badge>
+                          <Badge className="bg-green-100 text-green-700">
+                            {completedCount} Completed
+                          </Badge>
+                          <Badge variant="secondary">
+                            {group.interviews.length} Total
+                          </Badge>
+                          {isExpanded ? (
+                            <ChevronUp className="w-5 h-5 text-muted-foreground" />
+                          ) : (
+                            <ChevronDown className="w-5 h-5 text-muted-foreground" />
+                          )}
+                        </div>
                       </div>
-                      <div className="flex items-center gap-4 mt-1 text-xs text-muted-foreground">
-                        <span className="flex items-center gap-1">
-                          <Calendar className="w-3 h-3" />
-                          {format(new Date(interview.scheduled_at), 'MMM dd, yyyy')}
-                        </span>
-                        <span className="flex items-center gap-1">
-                          <Clock className="w-3 h-3" />
-                          {format(new Date(interview.scheduled_at), 'h:mm a')}
-                        </span>
-                        {interview.meeting_link && (
-                          <a 
-                            href={interview.meeting_link} 
-                            target="_blank" 
-                            rel="noopener noreferrer"
-                            className="flex items-center gap-1 text-primary hover:underline"
+
+                      <AnimatePresence>
+                        {isExpanded && (
+                          <motion.div
+                            initial={{ height: 0, opacity: 0 }}
+                            animate={{ height: 'auto', opacity: 1 }}
+                            exit={{ height: 0, opacity: 0 }}
+                            transition={{ duration: 0.2 }}
                           >
-                            <Link2 className="w-3 h-3" />
-                            Join Meeting
-                          </a>
+                            <div className="p-4 border-t space-y-3">
+                              {group.interviews.map((interview) => (
+                                <div
+                                  key={interview.id}
+                                  className="flex items-center justify-between p-4 bg-background rounded-lg border"
+                                >
+                                  <div className="flex items-center gap-4">
+                                    <div className="w-10 h-10 rounded-full gradient-primary flex items-center justify-center text-primary-foreground font-semibold text-sm">
+                                      {interview.application?.student_profile?.full_name?.split(' ').map(n => n[0]).join('') || '?'}
+                                    </div>
+                                    <div>
+                                      <p className="font-medium text-foreground">
+                                        {interview.application?.student_profile?.full_name || 'Unknown Student'}
+                                      </p>
+                                      <div className="flex items-center gap-4 mt-1 text-xs text-muted-foreground">
+                                        <span className="flex items-center gap-1">
+                                          <Calendar className="w-3 h-3" />
+                                          {format(new Date(interview.scheduled_at), 'MMM dd, yyyy')}
+                                        </span>
+                                        <span className="flex items-center gap-1">
+                                          <Clock className="w-3 h-3" />
+                                          {format(new Date(interview.scheduled_at), 'h:mm a')}
+                                        </span>
+                                        {interview.meeting_link && (
+                                          <a 
+                                            href={interview.meeting_link} 
+                                            target="_blank" 
+                                            rel="noopener noreferrer"
+                                            className="flex items-center gap-1 text-primary hover:underline"
+                                            onClick={(e) => e.stopPropagation()}
+                                          >
+                                            <Link2 className="w-3 h-3" />
+                                            Join Meeting
+                                          </a>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center gap-3">
+                                    {getStatusBadge(interview.interview_status)}
+                                    {interview.interview_status === 'scheduled' && (
+                                      <div className="flex gap-2">
+                                        <Button 
+                                          size="sm" 
+                                          variant="accent"
+                                          disabled={processingId === interview.id}
+                                          onClick={() => handleUpdateStatus(interview.id, 'completed')}
+                                        >
+                                          {processingId === interview.id ? (
+                                            <Loader2 className="w-4 h-4 animate-spin" />
+                                          ) : (
+                                            <>
+                                              <CheckCircle className="w-4 h-4 mr-1" />
+                                              Mark Done
+                                            </>
+                                          )}
+                                        </Button>
+                                        <Button 
+                                          size="sm" 
+                                          variant="outline"
+                                          className="text-red-500"
+                                          disabled={processingId === interview.id}
+                                          onClick={() => handleUpdateStatus(interview.id, 'cancelled')}
+                                        >
+                                          <XCircle className="w-4 h-4" />
+                                        </Button>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </motion.div>
                         )}
-                      </div>
+                      </AnimatePresence>
                     </div>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    {getStatusBadge(interview.interview_status)}
-                    <div className="flex gap-2">
-                      <Button 
-                        size="sm" 
-                        variant="accent"
-                        disabled={processingId === interview.id}
-                        onClick={() => handleUpdateStatus(interview.id, 'completed')}
-                      >
-                        {processingId === interview.id ? (
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                        ) : (
-                          <>
-                            <CheckCircle className="w-4 h-4 mr-1" />
-                            Mark Done
-                          </>
-                        )}
-                      </Button>
-                      <Button 
-                        size="sm" 
-                        variant="outline"
-                        className="text-red-500"
-                        disabled={processingId === interview.id}
-                        onClick={() => handleUpdateStatus(interview.id, 'cancelled')}
-                      >
-                        <XCircle className="w-4 h-4" />
-                      </Button>
-                    </div>
-                  </div>
-                </motion.div>
-              ))
+                  </motion.div>
+                );
+              })
             )}
           </CardContent>
         </Card>
       </motion.div>
-
-      {/* Past Interviews */}
-      {pastInterviews.length > 0 && (
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.3 }}
-        >
-          <Card variant="elevated">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Clock className="w-5 h-5 text-muted-foreground" />
-                Past Interviews
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {pastInterviews.map((interview, index) => (
-                <div
-                  key={interview.id}
-                  className="flex items-center justify-between p-4 bg-muted/20 rounded-lg"
-                >
-                  <div className="flex items-center gap-4">
-                    <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center text-muted-foreground font-semibold">
-                      {interview.application?.student_profile?.full_name?.split(' ').map(n => n[0]).join('') || '?'}
-                    </div>
-                    <div>
-                      <p className="font-medium text-foreground">
-                        {interview.application?.student_profile?.full_name || 'Unknown Student'}
-                      </p>
-                      <p className="text-sm text-muted-foreground">
-                        {interview.application?.job?.title} • {format(new Date(interview.scheduled_at), 'MMM dd, yyyy')}
-                      </p>
-                    </div>
-                  </div>
-                  {getStatusBadge(interview.interview_status)}
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-        </motion.div>
-      )}
 
       {/* Schedule Interview Dialog */}
       <Dialog open={showScheduleDialog} onOpenChange={setShowScheduleDialog}>
