@@ -185,21 +185,56 @@ export const useMentor = (userId?: string, userRole?: string) => {
     }
   };
 
-  // Send mentor request
+  // Send mentor request (or update existing rejected request)
   const sendMentorRequest = async (mentorId: string, department: string) => {
     if (!userId) return { error: 'Not authenticated' };
 
     try {
-      const { data, error } = await supabase
+      // First check if there's an existing rejected request
+      const { data: existingRequest } = await supabase
         .from('mentor_requests')
-        .insert({
-          student_id: userId,
-          mentor_id: mentorId,
-          department,
-          status: 'pending',
-        })
-        .select()
-        .single();
+        .select('id, status')
+        .eq('student_id', userId)
+        .maybeSingle();
+
+      let data;
+      let error;
+
+      if (existingRequest && existingRequest.status === 'rejected') {
+        // Update the existing rejected request with new mentor
+        const result = await supabase
+          .from('mentor_requests')
+          .update({
+            mentor_id: mentorId,
+            department,
+            status: 'pending',
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', existingRequest.id)
+          .select()
+          .single();
+        
+        data = result.data;
+        error = result.error;
+      } else if (!existingRequest) {
+        // No existing request, create a new one
+        const result = await supabase
+          .from('mentor_requests')
+          .insert({
+            student_id: userId,
+            mentor_id: mentorId,
+            department,
+            status: 'pending',
+          })
+          .select()
+          .single();
+        
+        data = result.data;
+        error = result.error;
+      } else {
+        // Existing request is pending or approved - shouldn't send new request
+        throw new Error('You already have an active mentor request');
+      }
 
       if (error) throw error;
 
